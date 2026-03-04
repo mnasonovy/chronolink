@@ -17,5 +17,9 @@ class SelectedDayNotifier extends Notifier<DateTime> {
 
   void nextDay() => state = state.add(const Duration(days: 1));
 
+  void prevWeek() => state = state.subtract(const Duration(days: 7));
+
+  void nextWeek() => state = state.add(const Duration(days: 7));
+
   void setDay(DateTime day) => state = dateOnly(day);
 }
