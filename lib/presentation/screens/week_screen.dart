@@ -12,7 +12,6 @@ class WeekScreen extends ConsumerWidget {
   DateTime _dateOnly(DateTime dt) => DateTime(dt.year, dt.month, dt.day);
 
   DateTime _startOfWeekMonday(DateTime day) {
-    // Dart: weekday 1..7 (Mon..Sun)
     final d = _dateOnly(day);
     return d.subtract(Duration(days: d.weekday - DateTime.monday));
   }
@@ -61,92 +60,108 @@ class WeekScreen extends ConsumerWidget {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Chronolink • Неделя'),
+        title: const Text('Неделя'),
         actions: [
+          IconButton(
+            tooltip: 'Месяц',
+            onPressed: () => context.go('/month'),
+            icon: const Icon(Icons.calendar_month_outlined),
+          ),
+          IconButton(
+            tooltip: 'День',
+            onPressed: () => context.go('/day'),
+            icon: const Icon(Icons.calendar_view_day_outlined),
+          ),
           IconButton(
             tooltip: 'Сегодня',
             onPressed: selectedDayCtrl.today,
-            icon: const Icon(Icons.today),
+            icon: const Icon(Icons.my_location_outlined),
           ),
         ],
       ),
-      body: Padding(
-        padding: const EdgeInsets.all(12),
-        child: Column(
-          children: [
-            _WeekHeader(
-              weekStart: weekStart,
-              onPrev: selectedDayCtrl.prevWeek,
-              onNext: selectedDayCtrl.nextWeek,
-            ),
-            const SizedBox(height: 10),
-            Expanded(
-              child: eventsAsync.when(
-                data: (events) {
-                  // сгруппируем события по дню
-                  final byDay = <DateTime, List<Event>>{};
-                  for (final d in days) {
-                    byDay[_dateOnly(d)] = <Event>[];
-                  }
+      body: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(12),
+          child: Column(
+            children: [
+              _WeekHeader(
+                weekStart: weekStart,
+                onPrev: selectedDayCtrl.prevWeek,
+                onNext: selectedDayCtrl.nextWeek,
+              ),
+              const SizedBox(height: 10),
 
-                  for (final e in events) {
-                    final d = _dateOnly(e.startDateTime);
-                    if (byDay.containsKey(d)) {
-                      byDay[d]!.add(e);
-                    }
-                  }
+              // ✅ КЛЮЧЕВАЯ ПРАВКА: ClipRect чтобы список НЕ рисовался поверх шапки при overscroll
+              Expanded(
+                child: ClipRect(
+                  child: eventsAsync.when(
+                    data: (events) {
+                      final byDay = <DateTime, List<Event>>{};
+                      for (final d in days) {
+                        byDay[_dateOnly(d)] = <Event>[];
+                      }
 
-                  // сортировка по времени начала
-                  for (final entry in byDay.entries) {
-                    entry.value.sort((a, b) => a.startDateTime.compareTo(b.startDateTime));
-                  }
+                      for (final e in events) {
+                        final d = _dateOnly(e.startDateTime);
+                        if (byDay.containsKey(d)) {
+                          byDay[d]!.add(e);
+                        }
+                      }
 
-                  return ListView.separated(
-                    itemCount: days.length,
-                    separatorBuilder: (_, __) => const SizedBox(height: 10),
-                    itemBuilder: (context, index) {
-                      final day = days[index];
-                      final key = _dateOnly(day);
-                      final list = byDay[key] ?? const <Event>[];
+                      for (final entry in byDay.entries) {
+                        entry.value.sort((a, b) => a.startDateTime.compareTo(b.startDateTime));
+                      }
 
-                      final isSelected = _dateOnly(selectedDay) == key;
-                      final isToday = _dateOnly(DateTime.now()) == key;
+                      return ListView.separated(
+                        // ✅ чтобы FAB не перекрывал нижние элементы
+                        padding: const EdgeInsets.only(bottom: 96),
+                        // ✅ убираем bounce-поведение, из-за которого "вылезает" вверх
+                        physics: const ClampingScrollPhysics(),
+                        itemCount: days.length,
+                        separatorBuilder: (_, __) => const SizedBox(height: 10),
+                        itemBuilder: (context, index) {
+                          final day = days[index];
+                          final key = _dateOnly(day);
+                          final list = byDay[key] ?? const <Event>[];
 
-                      return _DayBlock(
-                        day: day,
-                        weekdayText: _weekdayLabel(day.weekday),
-                        dateText: _dateLabel(day),
-                        isSelected: isSelected,
-                        isToday: isToday,
-                        events: list,
-                        timeLabel: _timeLabel,
-                        onOpenDay: () {
-                          selectedDayCtrl.setDay(day);
-                          context.go('/day');
-                        },
-                        onOpenEvent: (event) async {
-                          // Открываем день и сразу переходим — редактирование уже в DayScreen по тапу
-                          selectedDayCtrl.setDay(day);
-                          context.go('/day');
+                          final isSelected = _dateOnly(selectedDay) == key;
+                          final isToday = _dateOnly(DateTime.now()) == key;
+
+                          return _DayBlock(
+                            day: day,
+                            weekdayText: _weekdayLabel(day.weekday),
+                            dateText: _dateLabel(day),
+                            isSelected: isSelected,
+                            isToday: isToday,
+                            events: list,
+                            timeLabel: _timeLabel,
+                            onOpenDay: () {
+                              selectedDayCtrl.setDay(day);
+                              context.go('/day');
+                            },
+                            onOpenEvent: (event) async {
+                              selectedDayCtrl.setDay(day);
+                              context.go('/day');
+                            },
+                          );
                         },
                       );
                     },
-                  );
-                },
-                loading: () => const Center(child: CircularProgressIndicator()),
-                error: (e, st) => Center(child: Text('Ошибка: $e')),
+                    loading: () => const Center(child: CircularProgressIndicator()),
+                    error: (e, st) => Center(child: Text('Ошибка: $e')),
+                  ),
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: () {
-          // Быстро прыгнуть в Day на выбранную дату и добавить событие там
-          context.go('/day');
-        },
-        icon: const Icon(Icons.add),
-        label: const Text('Событие'),
+
+      // ✅ по твоему пункту: убрать "Событие", оставить просто +
+      floatingActionButton: FloatingActionButton(
+        tooltip: 'Добавить событие',
+        onPressed: () => context.go('/day'),
+        child: const Icon(Icons.add),
       ),
     );
   }
@@ -176,27 +191,77 @@ class _WeekHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Row(
-      children: [
-        IconButton(
-          tooltip: 'Предыдущая неделя',
-          onPressed: onPrev,
-          icon: const Icon(Icons.chevron_left),
+    final theme = Theme.of(context);
+
+    return Material(
+      borderRadius: BorderRadius.circular(16),
+      color: theme.colorScheme.surface,
+      child: Container(
+        padding: const EdgeInsets.fromLTRB(8, 8, 8, 10),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: theme.colorScheme.outlineVariant),
         ),
-        Expanded(
-          child: Center(
-            child: Text(
-              _rangeLabel(weekStart),
-              style: Theme.of(context).textTheme.titleMedium,
+        child: Column(
+          children: [
+            Row(
+              children: [
+                IconButton(
+                  tooltip: 'Предыдущая неделя',
+                  onPressed: onPrev,
+                  icon: const Icon(Icons.chevron_left),
+                ),
+                Expanded(
+                  child: Center(
+                    child: Text(
+                      _rangeLabel(weekStart),
+                      style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
+                    ),
+                  ),
+                ),
+                IconButton(
+                  tooltip: 'Следующая неделя',
+                  onPressed: onNext,
+                  icon: const Icon(Icons.chevron_right),
+                ),
+              ],
             ),
+            const SizedBox(height: 4),
+            Row(
+              children: const [
+                _W('Пн'),
+                _W('Вт'),
+                _W('Ср'),
+                _W('Чт'),
+                _W('Пт'),
+                _W('Сб'),
+                _W('Вс'),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _W extends StatelessWidget {
+  const _W(this.text);
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Expanded(
+      child: Center(
+        child: Text(
+          text,
+          style: theme.textTheme.bodySmall?.copyWith(
+            fontWeight: FontWeight.w600,
+            color: theme.colorScheme.onSurface.withValues(alpha: 0.7),
           ),
         ),
-        IconButton(
-          tooltip: 'Следующая неделя',
-          onPressed: onNext,
-          icon: const Icon(Icons.chevron_right),
-        ),
-      ],
+      ),
     );
   }
 }
@@ -228,12 +293,10 @@ class _DayBlock extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
 
-    final borderColor = isSelected
-        ? theme.colorScheme.primary
-        : theme.dividerColor;
+    final borderColor = isSelected ? theme.colorScheme.primary : theme.dividerColor;
 
     final headerStyle = theme.textTheme.titleSmall?.copyWith(
-      fontWeight: FontWeight.w700,
+      fontWeight: FontWeight.w800,
     );
 
     return InkWell(
@@ -243,6 +306,7 @@ class _DayBlock extends StatelessWidget {
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(16),
           border: Border.all(color: borderColor, width: isSelected ? 2 : 1),
+          color: isSelected ? theme.colorScheme.primaryContainer.withValues(alpha: 0.25) : null,
         ),
         padding: const EdgeInsets.all(12),
         child: Column(
@@ -263,7 +327,7 @@ class _DayBlock extends StatelessWidget {
                       'Сегодня',
                       style: theme.textTheme.labelSmall?.copyWith(
                         color: theme.colorScheme.onPrimaryContainer,
-                        fontWeight: FontWeight.w600,
+                        fontWeight: FontWeight.w700,
                       ),
                     ),
                   ),
@@ -280,7 +344,7 @@ class _DayBlock extends StatelessWidget {
             else
               Column(
                 children: [
-                  for (final e in events.take(5)) ...[
+                  for (final e in events.take(6)) ...[
                     _EventRow(
                       title: e.title,
                       timeText: '${timeLabel(e.startDateTime)}–${timeLabel(e.endDateTime)}',
@@ -290,11 +354,11 @@ class _DayBlock extends StatelessWidget {
                     ),
                     const SizedBox(height: 8),
                   ],
-                  if (events.length > 5)
+                  if (events.length > 6)
                     Align(
                       alignment: Alignment.centerLeft,
                       child: Text(
-                        'Ещё ${events.length - 5}…',
+                        'Ещё ${events.length - 6}…',
                         style: theme.textTheme.bodySmall?.copyWith(
                           color: theme.colorScheme.onSurfaceVariant,
                         ),
@@ -310,7 +374,7 @@ class _DayBlock extends StatelessWidget {
 
   String _reminderInline(int? minutes) {
     if (minutes == null) return '';
-    if (minutes == 0) return 'Сейчас';
+    if (minutes == 0) return 'к началу';
     return 'за $minutes мин';
   }
 }
@@ -361,7 +425,7 @@ class _EventRow extends StatelessWidget {
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: theme.textTheme.bodyLarge?.copyWith(
-                        fontWeight: FontWeight.w600,
+                        fontWeight: FontWeight.w700,
                       ),
                     ),
                     const SizedBox(height: 2),
@@ -386,7 +450,7 @@ class _EventRow extends StatelessWidget {
                   reminderText,
                   style: theme.textTheme.bodySmall?.copyWith(
                     color: theme.colorScheme.onSurfaceVariant,
-                    fontWeight: FontWeight.w600,
+                    fontWeight: FontWeight.w700,
                   ),
                 ),
               ],

@@ -46,10 +46,30 @@ class DayScreen extends ConsumerWidget {
 
     return Scaffold(
       appBar: AppBar(
-        title: Text('День · $dayLabel'),
+        title: const Text('День'),
         actions: [
+          // ✅ навигация как в Month/Week (в AppBar)
           IconButton(
-            tooltip: 'Уведомления (тест: удерживай)',
+            tooltip: 'Месяц',
+            onPressed: () => context.go('/month'),
+            icon: const Icon(Icons.calendar_month_outlined),
+          ),
+          IconButton(
+            tooltip: 'Неделя',
+            onPressed: () => context.go('/week'),
+            icon: const Icon(Icons.view_week_outlined),
+          ),
+
+          // ✅ Today: единая иконка как в Month
+          IconButton(
+            tooltip: 'Сегодня',
+            onPressed: selectedDayCtrl.today,
+            icon: const Icon(Icons.my_location_outlined),
+          ),
+
+          // Тест уведомлений оставляем (короткий тап = заглушка, лонг = тест)
+          IconButton(
+            tooltip: 'Уведомления (удерживай для теста)',
             onPressed: () {
               ScaffoldMessenger.of(context).showSnackBar(
                 const SnackBar(content: Text('Настройки уведомлений — скоро')),
@@ -68,11 +88,7 @@ class DayScreen extends ConsumerWidget {
             },
             icon: const Icon(Icons.notifications_active_outlined),
           ),
-          IconButton(
-            tooltip: 'Сегодня',
-            onPressed: selectedDayCtrl.today,
-            icon: const Icon(Icons.today),
-          ),
+
           IconButton(
             tooltip: 'Удалить все события',
             onPressed: () => confirmDeleteAll(context, ref),
@@ -82,7 +98,7 @@ class DayScreen extends ConsumerWidget {
       ),
       floatingActionButton: FloatingActionButton(
         tooltip: 'Добавить событие',
-        onPressed: openCreateEvent, // ✅ FAB делает создание
+        onPressed: openCreateEvent,
         child: const Icon(Icons.add),
       ),
       body: SafeArea(
@@ -97,11 +113,6 @@ class DayScreen extends ConsumerWidget {
                 onNext: selectedDayCtrl.nextDay,
                 onPick: () => pickDate(context, ref, selectedDay),
               ),
-              const SizedBox(height: 10),
-              ViewSwitcher(
-                onMonth: () => context.go('/month'),
-                onWeek: () => context.go('/week'),
-              ),
               const SizedBox(height: 12),
               Expanded(
                 child: eventsAsync.when(
@@ -115,8 +126,9 @@ class DayScreen extends ConsumerWidget {
                       selectedDay: selectedDay,
                       events: filtered,
                       onDelete: (id) async {
+                        // deleteById уже отменяет напоминание внутри controller,
+                        // но пусть будет доп. страховка (не мешает).
                         await ref.read(eventsControllerProvider.notifier).deleteById(id);
-                        await NotificationService.cancelEventReminder(id);
                       },
                       onTap: (event) async {
                         await Navigator.of(context).push(
@@ -125,7 +137,7 @@ class DayScreen extends ConsumerWidget {
                           ),
                         );
                       },
-                      onAdd: openCreateEvent, // ✅ Empty-state кнопка делает то же самое, что FAB
+                      onAdd: openCreateEvent,
                     );
                   },
                   loading: () => const Center(child: CircularProgressIndicator()),
@@ -175,7 +187,6 @@ class DayScreen extends ConsumerWidget {
     if (ok != true) return;
 
     await ref.read(eventsControllerProvider.notifier).deleteAll();
-    await NotificationService.cancelAll();
 
     if (context.mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -244,37 +255,6 @@ class TopBar extends StatelessWidget {
   }
 }
 
-class ViewSwitcher extends StatelessWidget {
-  const ViewSwitcher({
-    super.key,
-    required this.onMonth,
-    required this.onWeek,
-  });
-
-  final VoidCallback onMonth;
-  final VoidCallback onWeek;
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.center,
-      children: [
-        OutlinedButton.icon(
-          onPressed: onMonth,
-          icon: const Icon(Icons.calendar_month_outlined),
-          label: const Text('Месяц'),
-        ),
-        const SizedBox(width: 10),
-        OutlinedButton.icon(
-          onPressed: onWeek,
-          icon: const Icon(Icons.view_week_outlined),
-          label: const Text('Неделя'),
-        ),
-      ],
-    );
-  }
-}
-
 class EventsList extends StatelessWidget {
   const EventsList({
     super.key,
@@ -296,12 +276,13 @@ class EventsList extends StatelessWidget {
     if (events.isEmpty) {
       return EmptyState(
         dayLabel: formatDate(selectedDay),
-        onAdd: onAdd, // ✅
+        onAdd: onAdd,
       );
     }
 
     return ListView.separated(
-      padding: const EdgeInsets.fromLTRB(0, 0, 0, 96),
+      // ✅ запас снизу под FAB, чтобы ничего не перекрывалось
+      padding: const EdgeInsets.fromLTRB(0, 0, 0, 110),
       itemCount: events.length,
       separatorBuilder: (_, __) => const SizedBox(height: 10),
       itemBuilder: (context, index) {
@@ -455,7 +436,7 @@ class EmptyState extends StatelessWidget {
             ),
             const SizedBox(height: 14),
             FilledButton.icon(
-              onPressed: () => onAdd(), // ✅ тот же функционал что и +
+              onPressed: () => onAdd(),
               icon: const Icon(Icons.add),
               label: const Text('Добавить событие'),
             ),
@@ -511,6 +492,8 @@ class ErrorState extends StatelessWidget {
 }
 
 // -------- helpers (RU) --------
+
+DateTime dateOnly(DateTime dt) => DateTime(dt.year, dt.month, dt.day);
 
 String formatDate(DateTime dt) {
   final dd = dt.day.toString().padLeft(2, '0');

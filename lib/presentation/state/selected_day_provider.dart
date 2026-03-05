@@ -7,19 +7,17 @@ NotifierProvider<SelectedDayNotifier, DateTime>(SelectedDayNotifier.new);
 
 class SelectedDayNotifier extends Notifier<DateTime> {
   @override
-  DateTime build() {
-    return dateOnly(DateTime.now());
-  }
+  DateTime build() => dateOnly(DateTime.now());
 
   void today() => state = dateOnly(DateTime.now());
 
-  void prevDay() => state = state.subtract(const Duration(days: 1));
+  void prevDay() => state = dateOnly(state.subtract(const Duration(days: 1)));
 
-  void nextDay() => state = state.add(const Duration(days: 1));
+  void nextDay() => state = dateOnly(state.add(const Duration(days: 1)));
 
-  void prevWeek() => state = state.subtract(const Duration(days: 7));
+  void prevWeek() => state = dateOnly(state.subtract(const Duration(days: 7)));
 
-  void nextWeek() => state = state.add(const Duration(days: 7));
+  void nextWeek() => state = dateOnly(state.add(const Duration(days: 7)));
 
   void setDay(DateTime day) => state = dateOnly(day);
 }
