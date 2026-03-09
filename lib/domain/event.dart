@@ -5,7 +5,7 @@ class Event {
   final DateTime startDateTime;
   final DateTime endDateTime;
   final bool allDay;
-  final int? reminderBeforeMinutes; // null = no reminder
+  final int? reminderBeforeMinutes; // null = без напоминания
   final DateTime createdAt;
   final DateTime updatedAt;
 
@@ -21,25 +21,31 @@ class Event {
     required this.updatedAt,
   });
 
+  static const Object _unset = Object();
+
   Event copyWith({
     String? id,
     String? title,
-    String? description,
+    Object? description = _unset,
     DateTime? startDateTime,
     DateTime? endDateTime,
     bool? allDay,
-    int? reminderBeforeMinutes,
+    Object? reminderBeforeMinutes = _unset,
     DateTime? createdAt,
     DateTime? updatedAt,
   }) {
     return Event(
       id: id ?? this.id,
       title: title ?? this.title,
-      description: description ?? this.description,
+      description: identical(description, _unset)
+          ? this.description
+          : description as String?,
       startDateTime: startDateTime ?? this.startDateTime,
       endDateTime: endDateTime ?? this.endDateTime,
       allDay: allDay ?? this.allDay,
-      reminderBeforeMinutes: reminderBeforeMinutes ?? this.reminderBeforeMinutes,
+      reminderBeforeMinutes: identical(reminderBeforeMinutes, _unset)
+          ? this.reminderBeforeMinutes
+          : reminderBeforeMinutes as int?,
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
     );

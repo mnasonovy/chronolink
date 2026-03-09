@@ -1,5 +1,6 @@
 import 'event.dart';
 
+/// Контракт репозитория для работы с событиями.
 abstract class EventRepository {
   Future<List<Event>> getAll();
 

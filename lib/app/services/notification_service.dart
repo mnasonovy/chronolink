@@ -18,41 +18,45 @@ class NotificationService {
   static final FlutterLocalNotificationsPlugin _plugin =
   FlutterLocalNotificationsPlugin();
 
-  static const _channelId = 'chronolink_reminders';
-  static const _channelName = 'Chronolink reminders';
-  static const _channelDesc = 'Event reminders';
+  static const String _channelId = 'chronolink_reminders';
+  static const String _channelName = 'Chronolink reminders';
+  static const String _channelDescription = 'Event reminders';
 
   static bool? _androidPermissionGranted;
 
   static Future<void> init() async {
+    await _initTimezone();
+    await _initPlugin();
+    await _requestPermissions();
+  }
+
+  static Future<void> _initTimezone() async {
     tz.initializeTimeZones();
 
     try {
       final info = await FlutterTimezone.getLocalTimezone();
-      final tzName = info.identifier;
-      tz.setLocalLocation(tz.getLocation(tzName));
+      final timezoneName = info.identifier;
+      tz.setLocalLocation(tz.getLocation(timezoneName));
 
-      if (kDebugMode) {
-        // ignore: avoid_print
-        print('Local timezone: $tzName');
-      }
-    } catch (e) {
-      if (kDebugMode) {
-        // ignore: avoid_print
-        print('Timezone init failed: $e');
-      }
+      _log('Local timezone: $timezoneName');
+    } catch (e, st) {
+      _logError('Timezone init failed', e, st);
     }
+  }
 
+  static Future<void> _initPlugin() async {
     const androidInit = AndroidInitializationSettings('@mipmap/ic_launcher');
     const iosInit = DarwinInitializationSettings();
 
-    const initSettings = InitializationSettings(
+    const settings = InitializationSettings(
       android: androidInit,
       iOS: iosInit,
     );
 
-    await _plugin.initialize(settings: initSettings);
+    await _plugin.initialize(settings: settings);
+  }
 
+  static Future<void> _requestPermissions() async {
     final android = _plugin.resolvePlatformSpecificImplementation<
         AndroidFlutterLocalNotificationsPlugin>();
     final grantedAndroid = await android?.requestNotificationsPermission();
@@ -66,28 +70,27 @@ class NotificationService {
       sound: true,
     );
 
-    if (kDebugMode) {
-      // ignore: avoid_print
-      print('Notifications permission: android=$grantedAndroid ios=$grantedIos');
-    }
+    _log('Notifications permission: android=$grantedAndroid ios=$grantedIos');
   }
 
-  static int notificationIdFromEventId(String eventId) {
-    return eventId.hashCode & 0x7fffffff;
-  }
-
-  static NotificationDetails _details() {
+  static NotificationDetails _notificationDetails() {
     return const NotificationDetails(
       android: AndroidNotificationDetails(
         _channelId,
         _channelName,
-        channelDescription: _channelDesc,
+        channelDescription: _channelDescription,
         importance: Importance.max,
         priority: Priority.high,
       ),
       iOS: DarwinNotificationDetails(),
     );
   }
+
+  static int notificationIdFromEventId(String eventId) {
+    return eventId.hashCode & 0x7fffffff;
+  }
+
+  static bool get _isAndroidPermissionDenied => _androidPermissionGranted == false;
 
   static Future<void> showInstant({
     required int id,
@@ -98,48 +101,38 @@ class NotificationService {
       id: id,
       title: title,
       body: body,
-      notificationDetails: _details(),
+      notificationDetails: _notificationDetails(),
     );
   }
 
   static Future<ReminderScheduleResult> debugScheduleIn20s() async {
     try {
-      if (_androidPermissionGranted == false) {
-        if (kDebugMode) {
-          // ignore: avoid_print
-          print('Debug schedule blocked: android notifications permission denied');
-        }
+      if (_isAndroidPermissionDenied) {
+        _log('Debug schedule blocked: android notifications permission denied');
         return ReminderScheduleResult.permissionDenied;
       }
 
       final id = DateTime.now().millisecondsSinceEpoch % 100000;
-
       final scheduledLocal = DateTime.now().add(const Duration(seconds: 20));
       final when = tz.TZDateTime.from(scheduledLocal.toLocal(), tz.local);
 
-      if (kDebugMode) {
-        // ignore: avoid_print
-        print(
-          'Debug schedule in 20s: now=${DateTime.now()} when=$when tz=${tz.local.name}',
-        );
-      }
+      _log(
+        'Debug schedule in 20s: now=${DateTime.now()} when=$when tz=${tz.local.name}',
+      );
 
       await _plugin.zonedSchedule(
         id: id,
         title: 'Chronolink',
         body: 'Тестовое напоминание • через 20 сек',
         scheduledDate: when,
-        notificationDetails: _details(),
+        notificationDetails: _notificationDetails(),
         androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
         payload: 'debug',
       );
 
       return ReminderScheduleResult.scheduled;
-    } catch (e) {
-      if (kDebugMode) {
-        // ignore: avoid_print
-        print('Debug schedule error: $e');
-      }
+    } catch (e, st) {
+      _logError('Debug schedule error', e, st);
       return ReminderScheduleResult.error;
     }
   }
@@ -150,94 +143,94 @@ class NotificationService {
     required DateTime eventStartLocal,
     required int? reminderBeforeMinutes,
   }) async {
-    final notifId = notificationIdFromEventId(eventId);
+    final notificationId = notificationIdFromEventId(eventId);
 
     try {
-      // на всякий случай: при редактировании/пересоздании события
-      await _plugin.cancel(id: notifId);
+      await _plugin.cancel(id: notificationId);
 
       if (reminderBeforeMinutes == null) {
-        if (kDebugMode) {
-          // ignore: avoid_print
-          print('Reminder cancelled: eventId=$eventId (reminderBeforeMinutes=null)');
-        }
+        _log('Reminder cancelled: eventId=$eventId (reminderBeforeMinutes=null)');
         return ReminderScheduleResult.cancelled;
       }
 
-      if (_androidPermissionGranted == false) {
-        if (kDebugMode) {
-          // ignore: avoid_print
-          print('Reminder blocked: android notifications permission denied');
-        }
+      if (_isAndroidPermissionDenied) {
+        _log('Reminder blocked: android notifications permission denied');
         return ReminderScheduleResult.permissionDenied;
       }
 
       final scheduledLocal =
       eventStartLocal.subtract(Duration(minutes: reminderBeforeMinutes));
 
-      if (kDebugMode) {
-        // ignore: avoid_print
-        print('Schedule reminder: eventId=$eventId');
-        // ignore: avoid_print
-        print('Now: ${DateTime.now()}');
-        // ignore: avoid_print
-        print('EventStart: $eventStartLocal');
-        // ignore: avoid_print
-        print('ReminderMin: $reminderBeforeMinutes');
-        // ignore: avoid_print
-        print('ScheduledLocal: $scheduledLocal');
-        // ignore: avoid_print
-        print('TZ local: ${tz.local.name}');
-      }
+      _log('Schedule reminder: eventId=$eventId');
+      _log('Now: ${DateTime.now()}');
+      _log('EventStart: $eventStartLocal');
+      _log('ReminderMin: $reminderBeforeMinutes');
+      _log('ScheduledLocal: $scheduledLocal');
+      _log('TZ local: ${tz.local.name}');
 
-      // если уже поздно — не планируем
       if (!scheduledLocal.isAfter(DateTime.now())) {
-        if (kDebugMode) {
-          // ignore: avoid_print
-          print('NOT scheduled: scheduledLocal is not in the future');
-        }
+        _log('NOT scheduled: scheduledLocal is not in the future');
         return ReminderScheduleResult.notScheduledPast;
       }
 
       final when = tz.TZDateTime.from(scheduledLocal.toLocal(), tz.local);
+      final bodyText = _buildReminderBody(
+        title: title,
+        reminderBeforeMinutes: reminderBeforeMinutes,
+      );
 
-      if (kDebugMode) {
-        // ignore: avoid_print
-        print('TZ when: $when');
-      }
-
-      // 0 минут -> "Сейчас", иначе "через N мин"
-      final suffix = reminderBeforeMinutes == 0
-          ? 'Сейчас'
-          : 'через $reminderBeforeMinutes мин';
-      final bodyText = '$title • $suffix';
+      _log('TZ when: $when');
 
       await _plugin.zonedSchedule(
-        id: notifId,
+        id: notificationId,
         title: 'Chronolink',
         body: bodyText,
         scheduledDate: when,
-        notificationDetails: _details(),
+        notificationDetails: _notificationDetails(),
         androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
         payload: eventId,
       );
 
       return ReminderScheduleResult.scheduled;
-    } catch (e) {
-      if (kDebugMode) {
-        // ignore: avoid_print
-        print('scheduleEventReminder error: $e');
-      }
+    } catch (e, st) {
+      _logError('scheduleEventReminder error', e, st);
       return ReminderScheduleResult.error;
     }
   }
 
+  static String _buildReminderBody({
+    required String title,
+    required int reminderBeforeMinutes,
+  }) {
+    final suffix = reminderBeforeMinutes == 0
+        ? 'Сейчас'
+        : 'через $reminderBeforeMinutes мин';
+
+    return '$title • $suffix';
+  }
+
   static Future<void> cancelEventReminder(String eventId) async {
-    final notifId = notificationIdFromEventId(eventId);
-    await _plugin.cancel(id: notifId);
+    final notificationId = notificationIdFromEventId(eventId);
+    await _plugin.cancel(id: notificationId);
   }
 
   static Future<void> cancelAll() async {
     await _plugin.cancelAll();
+  }
+
+  static void _log(String message) {
+    if (kDebugMode) {
+      // ignore: avoid_print
+      print(message);
+    }
+  }
+
+  static void _logError(String prefix, Object error, StackTrace stackTrace) {
+    if (kDebugMode) {
+      // ignore: avoid_print
+      print('$prefix: $error');
+      // ignore: avoid_print
+      print(stackTrace);
+    }
   }
 }

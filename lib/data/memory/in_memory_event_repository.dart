@@ -1,14 +1,17 @@
-import '../domain/event.dart';
-import '../domain/event_repository.dart';
+import '../../domain/event.dart';
+import '../../domain/event_repository.dart';
 
+/// Простая in-memory реализация репозитория.
+/// Используется для тестов или быстрого запуска без Hive.
 class InMemoryEventRepository implements EventRepository {
-  final Map<String, Event> _storage = <String, Event>{};
+  final Map<String, Event> _storage = {};
 
   @override
   Future<List<Event>> getAll() async {
-    final list = _storage.values.toList()
+    final events = _storage.values.toList()
       ..sort((a, b) => a.startDateTime.compareTo(b.startDateTime));
-    return list;
+
+    return events;
   }
 
   @override

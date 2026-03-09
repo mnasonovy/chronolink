@@ -3,10 +3,12 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 
 import 'app/router.dart';
-import 'app/notification_service.dart';
+import 'app/services/notification_service.dart';
+import 'app/theme/app_theme.dart';
 
-void main() async {
+Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
   await Hive.initFlutter();
   await NotificationService.init();
 
@@ -25,11 +27,8 @@ class ChronolinkApp extends StatelessWidget {
     return MaterialApp.router(
       title: 'Chronolink',
       debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        useMaterial3: true,
-        colorSchemeSeed: Colors.deepPurple,
-      ),
       routerConfig: appRouter,
+      theme: AppTheme.light(),
     );
   }
 }

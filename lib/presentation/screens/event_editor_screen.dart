@@ -4,8 +4,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app/providers.dart';
+import '../../app/theme/app_colors.dart';
+import '../../app/theme/app_spacing.dart';
+import '../../app/utils/date_format.dart';
 import '../../domain/event.dart';
-import '../../presentation/state/events_controller.dart';
+import '../state/events_controller.dart';
 
 class EventEditorScreen extends ConsumerStatefulWidget {
   const EventEditorScreen({
@@ -24,115 +27,125 @@ class EventEditorScreen extends ConsumerStatefulWidget {
 }
 
 class _EventEditorScreenState extends ConsumerState<EventEditorScreen> {
+  static const List<int> _presetReminderMinutes = <int>[0, 5, 10, 15, 30, 60];
+  static const int _defaultDurationMinutes = 30;
+  static const int _defaultStartOffsetMinutes = 10;
+  static const int _maxCustomReminderMinutes = 180;
+
   final _formKey = GlobalKey<FormState>();
+
   late final TextEditingController _titleController;
-  late final TextEditingController _descController;
+  late final TextEditingController _descriptionController;
 
   late DateTime _start;
   late DateTime _end;
   late bool _allDay;
 
-  int? _reminderMinutes; // null = нет
+  int? _reminderMinutes;
   bool _isSaving = false;
 
-  bool get isEdit => widget.initialEvent != null;
+  bool get _isEdit => widget.initialEvent != null;
 
-  static const List<int> _presetReminderMinutes = <int>[0, 5, 10, 15, 30, 60];
+  @override
+  void initState() {
+    super.initState();
 
-  // ---------- time helpers ----------
+    final event = widget.initialEvent;
+
+    _titleController = TextEditingController(text: event?.title ?? '');
+    _descriptionController = TextEditingController(
+      text: event?.description ?? '',
+    );
+
+    _allDay = event?.allDay ?? false;
+
+    if (event != null) {
+      _initFromEvent(event);
+      return;
+    }
+
+    _initForCreate();
+  }
+
+  @override
+  void dispose() {
+    _titleController.dispose();
+    _descriptionController.dispose();
+    super.dispose();
+  }
+
+  void _initFromEvent(Event event) {
+    if (_allDay) {
+      _start = DateTime(
+        event.startDateTime.year,
+        event.startDateTime.month,
+        event.startDateTime.day,
+      );
+      _end = _start.add(const Duration(hours: 23, minutes: 59));
+    } else {
+      _start = event.startDateTime;
+      _end = event.endDateTime;
+    }
+
+    _reminderMinutes = event.reminderBeforeMinutes;
+  }
+
+  void _initForCreate() {
+    final roundedNow = _ceilToNext5Minutes(DateTime.now());
+    final fallbackStart = roundedNow.add(
+      const Duration(minutes: _defaultStartOffsetMinutes),
+    );
+    final fallbackEnd = fallbackStart.add(
+      const Duration(minutes: _defaultDurationMinutes),
+    );
+
+    _start = widget.initialStart ?? fallbackStart;
+    _end = widget.initialEnd ?? fallbackEnd;
+
+    if (_end.isBefore(_start)) {
+      _end = _start.add(const Duration(minutes: _defaultDurationMinutes));
+    }
+
+    _reminderMinutes = 10;
+  }
 
   DateTime _ceilToNext5Minutes(DateTime dt) {
     final local = dt.toLocal();
-    final base = DateTime(local.year, local.month, local.day, local.hour, local.minute);
-    final add = (5 - (base.minute % 5)) % 5; // 0..4
-    return base.add(Duration(minutes: add));
+    final base = DateTime(
+      local.year,
+      local.month,
+      local.day,
+      local.hour,
+      local.minute,
+    );
+    final addMinutes = (5 - (base.minute % 5)) % 5;
+    return base.add(Duration(minutes: addMinutes));
   }
 
-  /// Минут до старта (округление вверх): 0..∞
-  /// Если уже прошло/сейчас — возвращаем 0.
   int _minutesUntilStart() {
     final diff = _start.difference(DateTime.now());
     if (diff.inSeconds <= 0) return 0;
     return (diff.inSeconds / 60).ceil();
   }
 
+  bool get _startIsFuture => _start.isAfter(DateTime.now());
+
   String _untilStartText() {
-    final now = DateTime.now();
-    if (!_start.isAfter(now)) return 'Время начала уже не в будущем — напоминания не сработают.';
-    final m = _minutesUntilStart();
-    if (m <= 0) return 'Начало: сейчас';
-    if (m == 1) return 'До начала: примерно 1 мин.';
-    return 'До начала: примерно $m мин.';
-  }
-
-  bool _reminderFits(int minutes) {
-    if (minutes < 0) return false;
-    final now = DateTime.now();
-    if (!_start.isAfter(now)) return minutes == 0; // формально, но мы всё равно не дадим сохранить
-    if (minutes == 0) return true;
-    final until = _minutesUntilStart();
-    return until >= minutes;
-  }
-
-  // ---------- init/dispose ----------
-
-  @override
-  void initState() {
-    super.initState();
-    final e = widget.initialEvent;
-
-    _titleController = TextEditingController(text: e?.title ?? '');
-    _descController = TextEditingController(text: e?.description ?? '');
-
-    _allDay = e?.allDay ?? false;
-
-    if (e != null) {
-      if (_allDay) {
-        _start = DateTime(e.startDateTime.year, e.startDateTime.month, e.startDateTime.day);
-        _end = _start.add(const Duration(hours: 23, minutes: 59));
-      } else {
-        _start = e.startDateTime;
-        _end = e.endDateTime;
-      }
-      _reminderMinutes = e.reminderBeforeMinutes;
-      return;
+    if (!_startIsFuture) {
+      return 'Время начала уже не в будущем — напоминание не сработает.';
     }
 
-    // ✅ fallback: округление до 5 минут вверх, потом +10 минут
-    final now = DateTime.now();
-    final roundedNow = _ceilToNext5Minutes(now);
-    final fallbackStart = roundedNow.add(const Duration(minutes: 10));
-    final fallbackEnd = fallbackStart.add(const Duration(minutes: 30));
+    final minutes = _minutesUntilStart();
 
-    _start = widget.initialStart ?? fallbackStart;
-    _end = widget.initialEnd ?? fallbackEnd;
-
-    if (_end.isBefore(_start)) {
-      _end = _start.add(const Duration(minutes: 30));
+    if (minutes <= 0) {
+      return 'Начало уже наступает.';
     }
-
-    _reminderMinutes = 10;
+    if (minutes == 1) {
+      return 'До начала примерно 1 минута.';
+    }
+    return 'До начала примерно $minutes минут.';
   }
 
-  @override
-  void dispose() {
-    _titleController.dispose();
-    _descController.dispose();
-    super.dispose();
-  }
-
-  // ---------- UI helpers ----------
-
-  String _formatDateTime(DateTime dt) {
-    final dd = dt.day.toString().padLeft(2, '0');
-    final mm = dt.month.toString().padLeft(2, '0');
-    final yyyy = dt.year.toString();
-    final hh = dt.hour.toString().padLeft(2, '0');
-    final min = dt.minute.toString().padLeft(2, '0');
-    return '$dd.$mm.$yyyy $hh:$min';
-  }
-
-  /// ⚠️ В редакторе 0 минут = "В момент начала" (не "Сейчас")
   String _reminderLabel(int? minutes) {
     if (minutes == null) return 'Нет';
     if (minutes == 0) return 'В момент начала';
@@ -141,35 +154,142 @@ class _EventEditorScreenState extends ConsumerState<EventEditorScreen> {
     return 'За $minutes минут';
   }
 
+  bool _reminderFits(int minutes) {
+    if (minutes < 0) return false;
+    if (!_startIsFuture) return minutes == 0;
+    if (minutes == 0) return true;
+    return _minutesUntilStart() >= minutes;
+  }
+
   List<int> _allowedPresets() {
-    // Разрешаем только те варианты, которые "влезают" (и 0 — если событие в будущем)
     final until = _minutesUntilStart();
-    final isFuture = _start.isAfter(DateTime.now());
     final allowed = <int>[];
 
-    for (final m in _presetReminderMinutes) {
-      if (m == 0) {
-        if (isFuture) allowed.add(m);
-      } else {
-        if (until >= m) allowed.add(m);
+    for (final minutes in _presetReminderMinutes) {
+      if (minutes == 0) {
+        if (_startIsFuture) {
+          allowed.add(minutes);
+        }
+        continue;
+      }
+
+      if (until >= minutes) {
+        allowed.add(minutes);
       }
     }
+
     return allowed;
   }
 
-  // ---------- Better custom reminder picker ----------
+  Future<void> _pickStart() async {
+    final pickedDate = await showDatePicker(
+      context: context,
+      firstDate: DateTime(2000),
+      lastDate: DateTime(2100),
+      initialDate: _start,
+      helpText: 'Дата начала',
+    );
+    if (pickedDate == null) return;
+
+    if (_allDay) {
+      setState(() {
+        _start = DateTime(
+          pickedDate.year,
+          pickedDate.month,
+          pickedDate.day,
+        );
+        _end = _start.add(const Duration(hours: 23, minutes: 59));
+      });
+      return;
+    }
+
+    final pickedTime = await showTimePicker(
+      context: context,
+      initialTime: TimeOfDay.fromDateTime(_start),
+      helpText: 'Время начала',
+    );
+    if (pickedTime == null) return;
+
+    setState(() {
+      _start = DateTime(
+        pickedDate.year,
+        pickedDate.month,
+        pickedDate.day,
+        pickedTime.hour,
+        pickedTime.minute,
+      );
+
+      if (_end.isBefore(_start)) {
+        _end = _start.add(const Duration(minutes: _defaultDurationMinutes));
+      }
+
+      final until = _minutesUntilStart();
+      if (_reminderMinutes != null &&
+          _reminderMinutes! > 0 &&
+          until < _reminderMinutes!) {
+        _reminderMinutes = 0;
+      }
+    });
+  }
+
+  Future<void> _pickEnd() async {
+    if (_allDay) return;
+
+    final pickedDate = await showDatePicker(
+      context: context,
+      firstDate: DateTime(2000),
+      lastDate: DateTime(2100),
+      initialDate: _end,
+      helpText: 'Дата окончания',
+    );
+    if (pickedDate == null) return;
+
+    final pickedTime = await showTimePicker(
+      context: context,
+      initialTime: TimeOfDay.fromDateTime(_end),
+      helpText: 'Время окончания',
+    );
+    if (pickedTime == null) return;
+
+    final newEnd = DateTime(
+      pickedDate.year,
+      pickedDate.month,
+      pickedDate.day,
+      pickedTime.hour,
+      pickedTime.minute,
+    );
+
+    if (newEnd.isBefore(_start)) {
+      _showSnackBar('Окончание не может быть раньше начала');
+      return;
+    }
+
+    setState(() {
+      _end = newEnd;
+    });
+  }
+
+  void _toggleAllDay(bool value) {
+    setState(() {
+      _allDay = value;
+
+      if (_allDay) {
+        final date = _start;
+        _start = DateTime(date.year, date.month, date.day);
+        _end = _start.add(const Duration(hours: 23, minutes: 59));
+      }
+    });
+  }
 
   Future<int?> _pickCustomReminderMinutes({
     required int minutesUntilStart,
     required bool startIsFuture,
   }) async {
     final theme = Theme.of(context);
-
-    // start value
-    int value = _reminderMinutes ?? min(10, minutesUntilStart);
-
-    // clamp to allowed range
-    value = value.clamp(0, 180);
+    int value = (_reminderMinutes ?? min(10, minutesUntilStart)).clamp(
+      0,
+      _maxCustomReminderMinutes,
+    );
 
     return showModalBottomSheet<int?>(
       context: context,
@@ -179,106 +299,126 @@ class _EventEditorScreenState extends ConsumerState<EventEditorScreen> {
         return StatefulBuilder(
           builder: (ctx, setLocal) {
             String helperText() {
-              if (!startIsFuture) return 'Сначала выбери будущее время начала.';
-              if (value == 0) return 'Сработает в момент начала.';
-              if (minutesUntilStart < value) {
-                return 'До события менее $value минут — такое напоминание поставить нельзя.';
+              if (!startIsFuture) {
+                return 'Сначала выбери будущее время начала.';
               }
-              return 'Поставим напоминание за $value мин до начала.';
+              if (value == 0) {
+                return 'Напоминание придёт в момент начала.';
+              }
+              if (minutesUntilStart < value) {
+                return 'До события меньше $value минут — такое напоминание поставить нельзя.';
+              }
+              return 'Напоминание придёт за $value мин до начала.';
             }
 
-            final canSave = startIsFuture && (value == 0 || minutesUntilStart >= value);
+            final canSave =
+                startIsFuture && (value == 0 || minutesUntilStart >= value);
 
-            Widget quick(int m) {
-              final selected = value == m;
+            Widget quickChip(int minutes) {
               return ChoiceChip(
-                label: Text(m == 0 ? 'В момент начала' : '$m мин'),
-                selected: selected,
-                onSelected: (_) => setLocal(() => value = m),
+                label: Text(
+                  minutes == 0 ? 'В момент начала' : '$minutes мин',
+                ),
+                selected: value == minutes,
+                onSelected: (_) => setLocal(() => value = minutes),
               );
             }
 
-            return Padding(
-              padding: EdgeInsets.only(
-                left: 16,
-                right: 16,
-                top: 8,
-                bottom: 16 + MediaQuery.of(ctx).viewInsets.bottom,
-              ),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Text('Другое напоминание', style: theme.textTheme.titleMedium),
-                  const SizedBox(height: 10),
-
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
-                    children: [
-                      quick(0),
-                      quick(5),
-                      quick(10),
-                      quick(15),
-                      quick(30),
-                      quick(60),
-                    ],
-                  ),
-
-                  const SizedBox(height: 14),
-
-                  Row(
-                    children: [
-                      IconButton(
-                        tooltip: 'Минус 1',
-                        onPressed: () => setLocal(() => value = max(0, value - 1)),
-                        icon: const Icon(Icons.remove_circle_outline),
-                      ),
-                      Expanded(
-                        child: Slider(
-                          value: value.toDouble(),
-                          min: 0,
-                          max: 180,
-                          divisions: 180,
-                          label: value == 0 ? 'В момент начала' : '$value мин',
-                          onChanged: (v) => setLocal(() => value = v.round()),
-                        ),
-                      ),
-                      IconButton(
-                        tooltip: 'Плюс 1',
-                        onPressed: () => setLocal(() => value = min(180, value + 1)),
-                        icon: const Icon(Icons.add_circle_outline),
-                      ),
-                    ],
-                  ),
-
-                  Text(
-                    helperText(),
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      color: canSave ? theme.colorScheme.onSurfaceVariant : theme.colorScheme.error,
+            return SafeArea(
+              child: Padding(
+                padding: EdgeInsets.only(
+                  left: AppSpacing.lg,
+                  right: AppSpacing.lg,
+                  top: AppSpacing.sm,
+                  bottom: AppSpacing.lg + MediaQuery.of(ctx).viewInsets.bottom,
+                ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Text(
+                      'Другое напоминание',
+                      style: theme.textTheme.titleLarge,
                     ),
-                  ),
-
-                  const SizedBox(height: 14),
-
-                  Row(
-                    children: [
-                      Expanded(
-                        child: OutlinedButton(
-                          onPressed: () => Navigator.of(ctx).pop(null),
-                          child: const Text('Отмена'),
+                    const SizedBox(height: AppSpacing.md),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: [
+                        quickChip(0),
+                        quickChip(5),
+                        quickChip(10),
+                        quickChip(15),
+                        quickChip(30),
+                        quickChip(60),
+                      ],
+                    ),
+                    const SizedBox(height: AppSpacing.lg),
+                    Row(
+                      children: [
+                        IconButton(
+                          tooltip: 'Минус 1',
+                          onPressed: () => setLocal(
+                                () => value = max(0, value - 1),
+                          ),
+                          icon: const Icon(Icons.remove_circle_outline),
                         ),
-                      ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: FilledButton(
-                          onPressed: canSave ? () => Navigator.of(ctx).pop(value) : null,
-                          child: const Text('Сохранить'),
+                        Expanded(
+                          child: Slider(
+                            value: value.toDouble(),
+                            min: 0,
+                            max: _maxCustomReminderMinutes.toDouble(),
+                            divisions: _maxCustomReminderMinutes,
+                            label: value == 0
+                                ? 'В момент начала'
+                                : '$value мин',
+                            onChanged: (v) => setLocal(
+                                  () => value = v.round(),
+                            ),
+                          ),
                         ),
+                        IconButton(
+                          tooltip: 'Плюс 1',
+                          onPressed: () => setLocal(
+                                () => value = min(
+                              _maxCustomReminderMinutes,
+                              value + 1,
+                            ),
+                          ),
+                          icon: const Icon(Icons.add_circle_outline),
+                        ),
+                      ],
+                    ),
+                    Text(
+                      helperText(),
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: canSave
+                            ? theme.colorScheme.onSurfaceVariant
+                            : theme.colorScheme.error,
                       ),
-                    ],
-                  ),
-                ],
+                    ),
+                    const SizedBox(height: AppSpacing.lg),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: OutlinedButton(
+                            onPressed: () => Navigator.of(ctx).pop(null),
+                            child: const Text('Отмена'),
+                          ),
+                        ),
+                        const SizedBox(width: AppSpacing.md),
+                        Expanded(
+                          child: FilledButton(
+                            onPressed: canSave
+                                ? () => Navigator.of(ctx).pop(value)
+                                : null,
+                            child: const Text('Сохранить'),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
               ),
             );
           },
@@ -287,90 +427,11 @@ class _EventEditorScreenState extends ConsumerState<EventEditorScreen> {
     );
   }
 
-  // ---------- Date/time picking ----------
-
-  void _toggleAllDay(bool value) {
-    setState(() {
-      _allDay = value;
-      if (value) {
-        final date = _start;
-        _start = DateTime(date.year, date.month, date.day);
-        _end = _start.add(const Duration(hours: 23, minutes: 59));
-      }
-    });
-  }
-
-  Future<void> _pickStart() async {
-    final date = await showDatePicker(
-      context: context,
-      firstDate: DateTime(2000),
-      lastDate: DateTime(2100),
-      initialDate: _start,
-      helpText: 'Выберите дату начала',
-    );
-    if (date == null) return;
-
-    final time = await showTimePicker(
-      context: context,
-      initialTime: TimeOfDay.fromDateTime(_start),
-      helpText: 'Выберите время начала',
-    );
-    if (time == null) return;
-
-    setState(() {
-      _start = DateTime(date.year, date.month, date.day, time.hour, time.minute);
-      if (_end.isBefore(_start)) {
-        _end = _start.add(const Duration(minutes: 30));
-      }
-
-      // если выбранное напоминание больше чем "до старта" — сбросим на 0
-      final until = _minutesUntilStart();
-      if (_reminderMinutes != null && _reminderMinutes! > 0 && until < _reminderMinutes!) {
-        _reminderMinutes = 0;
-      }
-    });
-  }
-
-  Future<void> _pickEnd() async {
-    final date = await showDatePicker(
-      context: context,
-      firstDate: DateTime(2000),
-      lastDate: DateTime(2100),
-      initialDate: _end,
-      helpText: 'Выберите дату окончания',
-    );
-    if (date == null) return;
-
-    final time = await showTimePicker(
-      context: context,
-      initialTime: TimeOfDay.fromDateTime(_end),
-      helpText: 'Выберите время окончания',
-    );
-    if (time == null) return;
-
-    final newEnd = DateTime(date.year, date.month, date.day, time.hour, time.minute);
-
-    if (newEnd.isBefore(_start)) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Окончание не может быть раньше начала')),
-      );
-      return;
-    }
-
-    setState(() {
-      _end = newEnd;
-    });
-  }
-
-  // ---------- Validation ----------
-
   Future<bool> _validateReminderFits() async {
-    final rem = _reminderMinutes;
-    if (rem == null) return true;
+    final reminder = _reminderMinutes;
+    if (reminder == null) return true;
 
-    final now = DateTime.now();
-
-    if (!_start.isAfter(now)) {
+    if (!_startIsFuture) {
       await showDialog<void>(
         context: context,
         builder: (ctx) => AlertDialog(
@@ -390,54 +451,49 @@ class _EventEditorScreenState extends ConsumerState<EventEditorScreen> {
       return false;
     }
 
-    if (rem == 0) return true;
+    if (reminder == 0) return true;
 
     final minutesUntilStart = _minutesUntilStart();
+    if (minutesUntilStart >= reminder) return true;
 
-    if (minutesUntilStart < rem) {
-      await showDialog<void>(
-        context: context,
-        builder: (ctx) => AlertDialog(
-          title: const Text('Напоминание не получится'),
-          content: Text(
-            'До события менее $rem минут.\n'
-                'Такое напоминание поставить нельзя.\n\n'
-                'Выберите меньшее значение или "В момент начала".',
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(ctx).pop(),
-              child: const Text('Понял'),
-            ),
-          ],
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Напоминание не получится'),
+        content: Text(
+          'До события менее $reminder минут.\n'
+              'Такое напоминание поставить нельзя.\n\n'
+              'Выберите меньшее значение или "В момент начала".',
         ),
-      );
-      return false;
-    }
-
-    return true;
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Понял'),
+          ),
+        ],
+      ),
+    );
+    return false;
   }
-
-  // ---------- Save ----------
 
   Future<void> _save() async {
     if (_isSaving) return;
 
-    final ok = _formKey.currentState?.validate() ?? false;
-    if (!ok) return;
+    final isValid = _formKey.currentState?.validate() ?? false;
+    if (!isValid) return;
 
-    final reminderOk = await _validateReminderFits();
-    if (!reminderOk) return;
+    final reminderIsValid = await _validateReminderFits();
+    if (!reminderIsValid) return;
 
     setState(() => _isSaving = true);
 
     try {
       final controller = ref.read(eventsControllerProvider.notifier);
 
-      if (isEdit) {
+      if (_isEdit) {
         final updated = widget.initialEvent!.copyWith(
-          title: _titleController.text,
-          description: _descController.text,
+          title: _titleController.text.trim(),
+          description: _normalizedDescription(),
           startDateTime: _start,
           endDateTime: _end,
           allDay: _allDay,
@@ -448,8 +504,8 @@ class _EventEditorScreenState extends ConsumerState<EventEditorScreen> {
       } else {
         final factory = ref.read(eventFactoryProvider);
         final created = factory.create(
-          title: _titleController.text,
-          description: _descController.text,
+          title: _titleController.text.trim(),
+          description: _normalizedDescription(),
           startDateTime: _start,
           endDateTime: _end,
           allDay: _allDay,
@@ -458,28 +514,66 @@ class _EventEditorScreenState extends ConsumerState<EventEditorScreen> {
         await controller.upsert(created);
       }
 
-      if (mounted) Navigator.of(context).pop();
-    } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Ошибка сохранения: $e')),
-        );
+        Navigator.of(context).pop();
       }
-      setState(() => _isSaving = false);
+    } catch (error) {
+      _showSnackBar('Ошибка сохранения: $error');
+      if (mounted) {
+        setState(() => _isSaving = false);
+      }
     }
   }
 
-  // ---------- UI ----------
+  String? _normalizedDescription() {
+    final trimmed = _descriptionController.text.trim();
+    if (trimmed.isEmpty) return null;
+    return trimmed;
+  }
+
+  void _showSnackBar(String message) {
+    if (!mounted) return;
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(message)),
+    );
+  }
+
+  Future<void> _onPickCustomReminder() async {
+    final picked = await _pickCustomReminderMinutes(
+      minutesUntilStart: _minutesUntilStart(),
+      startIsFuture: _startIsFuture,
+    );
+
+    if (!mounted || picked == null) return;
+
+    if (!_reminderFits(picked)) {
+      _showSnackBar(
+        picked == 0
+            ? 'Сначала выбери будущее время начала'
+            : 'До события менее $picked минут — такое напоминание поставить нельзя.',
+      );
+      return;
+    }
+
+    setState(() {
+      _reminderMinutes = picked;
+    });
+  }
+
+  String _dateOnlyLabel(DateTime dt) => formatDate(dt);
+
+  String _timeOnlyLabel(DateTime dt) => formatTime(dt);
 
   @override
   Widget build(BuildContext context) {
-    final allowed = _allowedPresets();
-    final minutesUntilStart = _minutesUntilStart();
-    final startIsFuture = _start.isAfter(DateTime.now());
+    final allowedPresets = _allowedPresets();
+    final startIsFuture = _startIsFuture;
+    final theme = Theme.of(context);
 
     return Scaffold(
       appBar: AppBar(
-        title: Text(isEdit ? 'Редактирование' : 'Новое событие'),
+        title: Text(_isEdit ? 'Редактирование' : 'Новое событие'),
         actions: [
           TextButton(
             onPressed: _isSaving ? null : _save,
@@ -494,67 +588,69 @@ class _EventEditorScreenState extends ConsumerState<EventEditorScreen> {
         ],
       ),
       body: Padding(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(AppSpacing.lg),
         child: Form(
           key: _formKey,
           child: ListView(
             children: [
-              // --- Заголовок ---
               Text(
                 'Событие',
-                style: Theme.of(context).textTheme.titleMedium,
+                style: theme.textTheme.titleMedium,
               ),
-              const SizedBox(height: 8),
+              const SizedBox(height: AppSpacing.sm),
               TextFormField(
                 controller: _titleController,
+                enabled: !_isSaving,
                 decoration: const InputDecoration(
                   labelText: 'Название',
-                  border: OutlineInputBorder(),
                 ),
-                enabled: !_isSaving,
-                validator: (v) => v == null || v.trim().isEmpty ? 'Введите название' : null,
+                validator: (value) {
+                  if (value == null || value.trim().isEmpty) {
+                    return 'Введите название';
+                  }
+                  return null;
+                },
               ),
-              const SizedBox(height: 12),
+              const SizedBox(height: AppSpacing.md),
               TextFormField(
-                controller: _descController,
-                decoration: const InputDecoration(
-                  labelText: 'Описание (необязательно)',
-                  border: OutlineInputBorder(),
-                ),
+                controller: _descriptionController,
                 enabled: !_isSaving,
                 minLines: 2,
                 maxLines: 4,
+                decoration: const InputDecoration(
+                  labelText: 'Описание (необязательно)',
+                ),
               ),
-
-              const SizedBox(height: 20),
-
-              // --- Время ---
+              const SizedBox(height: AppSpacing.xl),
               Text(
                 'Время',
-                style: Theme.of(context).textTheme.titleMedium,
+                style: theme.textTheme.titleMedium,
               ),
-              const SizedBox(height: 8),
+              const SizedBox(height: AppSpacing.sm),
               SwitchListTile(
                 value: _allDay,
                 onChanged: _isSaving ? null : _toggleAllDay,
                 title: const Text('Весь день'),
                 contentPadding: EdgeInsets.zero,
               ),
+              const SizedBox(height: AppSpacing.sm),
               if (!_allDay) ...[
                 Card(
                   child: Column(
                     children: [
-                      ListTile(
-                        title: const Text('Начало'),
-                        subtitle: Text(_formatDateTime(_start)),
-                        trailing: const Icon(Icons.edit),
+                      _DateTimeTile(
+                        label: 'Начало',
+                        dateText: _dateOnlyLabel(_start),
+                        timeText: _timeOnlyLabel(_start),
+                        icon: Icons.schedule_outlined,
                         onTap: _isSaving ? null : _pickStart,
                       ),
                       const Divider(height: 1),
-                      ListTile(
-                        title: const Text('Окончание'),
-                        subtitle: Text(_formatDateTime(_end)),
-                        trailing: const Icon(Icons.edit),
+                      _DateTimeTile(
+                        label: 'Окончание',
+                        dateText: _dateOnlyLabel(_end),
+                        timeText: _timeOnlyLabel(_end),
+                        icon: Icons.flag_outlined,
                         onTap: _isSaving ? null : _pickEnd,
                       ),
                     ],
@@ -562,24 +658,21 @@ class _EventEditorScreenState extends ConsumerState<EventEditorScreen> {
                 ),
               ] else ...[
                 Card(
-                  child: ListTile(
-                    title: const Text('Дата'),
-                    subtitle: Text(_formatDateTime(_start).split(' ').first),
-                    trailing: const Icon(Icons.calendar_today),
+                  child: _DateTimeTile(
+                    label: 'Дата',
+                    dateText: _dateOnlyLabel(_start),
+                    timeText: 'Весь день',
+                    icon: Icons.calendar_today_outlined,
                     onTap: _isSaving ? null : _pickStart,
                   ),
                 ),
               ],
-
-              const SizedBox(height: 20),
-
-              // --- Напоминание ---
+              const SizedBox(height: AppSpacing.xl),
               Text(
                 'Напоминание',
-                style: Theme.of(context).textTheme.titleMedium,
+                style: theme.textTheme.titleMedium,
               ),
-              const SizedBox(height: 8),
-
+              const SizedBox(height: AppSpacing.sm),
               Card(
                 child: Column(
                   children: [
@@ -590,7 +683,7 @@ class _EventEditorScreenState extends ConsumerState<EventEditorScreen> {
                     ),
                     const Divider(height: 1),
                     Padding(
-                      padding: const EdgeInsets.all(12),
+                      padding: const EdgeInsets.all(AppSpacing.md),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
@@ -598,57 +691,38 @@ class _EventEditorScreenState extends ConsumerState<EventEditorScreen> {
                             spacing: 8,
                             runSpacing: 8,
                             children: [
-                              // "Нет"
                               ChoiceChip(
                                 label: const Text('Нет'),
                                 selected: _reminderMinutes == null,
-                                onSelected: _isSaving ? null : (_) => setState(() => _reminderMinutes = null),
+                                onSelected: _isSaving
+                                    ? null
+                                    : (_) => setState(() {
+                                  _reminderMinutes = null;
+                                }),
                               ),
-
-                              // пресеты (только разрешённые)
-                              for (final m in allowed)
+                              for (final minutes in allowedPresets)
                                 ChoiceChip(
-                                  label: Text(_reminderLabel(m)),
-                                  selected: _reminderMinutes == m,
-                                  onSelected: _isSaving ? null : (_) => setState(() => _reminderMinutes = m),
+                                  label: Text(_reminderLabel(minutes)),
+                                  selected: _reminderMinutes == minutes,
+                                  onSelected: _isSaving
+                                      ? null
+                                      : (_) => setState(() {
+                                    _reminderMinutes = minutes;
+                                  }),
                                 ),
-
-                              // Другое...
                               ActionChip(
                                 label: const Text('Другое…'),
-                                onPressed: _isSaving
-                                    ? null
-                                    : () async {
-                                  final picked = await _pickCustomReminderMinutes(
-                                    minutesUntilStart: minutesUntilStart,
-                                    startIsFuture: startIsFuture,
-                                  );
-                                  if (!mounted) return;
-                                  if (picked == null) return;
-
-                                  // финальная страховка
-                                  if (!_reminderFits(picked)) {
-                                    ScaffoldMessenger.of(context).showSnackBar(
-                                      SnackBar(
-                                        content: Text(
-                                          picked == 0
-                                              ? 'Сначала выбери будущее время начала'
-                                              : 'До события менее $picked минут — такое напоминание поставить нельзя.',
-                                        ),
-                                      ),
-                                    );
-                                    return;
-                                  }
-
-                                  setState(() => _reminderMinutes = picked);
-                                },
+                                onPressed:
+                                _isSaving ? null : _onPickCustomReminder,
                               ),
                             ],
                           ),
-                          const SizedBox(height: 10),
+                          const SizedBox(height: AppSpacing.md),
                           Text(
                             _untilStartText(),
-                            style: Theme.of(context).textTheme.bodySmall,
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: theme.colorScheme.onSurfaceVariant,
+                            ),
                           ),
                         ],
                       ),
@@ -656,9 +730,7 @@ class _EventEditorScreenState extends ConsumerState<EventEditorScreen> {
                   ],
                 ),
               ),
-
-              const SizedBox(height: 16),
-
+              const SizedBox(height: AppSpacing.lg),
               FilledButton(
                 onPressed: _isSaving ? null : _save,
                 child: _isSaving
@@ -667,12 +739,86 @@ class _EventEditorScreenState extends ConsumerState<EventEditorScreen> {
                   height: 18,
                   child: CircularProgressIndicator(strokeWidth: 2),
                 )
-                    : const Text('Сохранить событие'),
+                    : Text(_isEdit ? 'Сохранить изменения' : 'Сохранить событие'),
               ),
             ],
           ),
         ),
       ),
+    );
+  }
+}
+
+class _DateTimeTile extends StatelessWidget {
+  const _DateTimeTile({
+    required this.label,
+    required this.dateText,
+    required this.timeText,
+    required this.icon,
+    required this.onTap,
+  });
+
+  final String label;
+  final String dateText;
+  final String timeText;
+  final IconData icon;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return ListTile(
+      onTap: onTap,
+      leading: Container(
+        width: 40,
+        height: 40,
+        decoration: const BoxDecoration(
+          color: AppColors.surfaceSoft,
+          shape: BoxShape.circle,
+        ),
+        child: Icon(
+          icon,
+          color: AppColors.primary,
+          size: 20,
+        ),
+      ),
+      title: Text(label),
+      subtitle: Padding(
+        padding: const EdgeInsets.only(top: 4),
+        child: Row(
+          children: [
+            Expanded(
+              child: Text(
+                dateText,
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  color: AppColors.textPrimary,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+            const SizedBox(width: 8),
+            Container(
+              padding: const EdgeInsets.symmetric(
+                horizontal: 10,
+                vertical: 6,
+              ),
+              decoration: BoxDecoration(
+                color: AppColors.primarySoft,
+                borderRadius: BorderRadius.circular(999),
+              ),
+              child: Text(
+                timeText,
+                style: theme.textTheme.labelSmall?.copyWith(
+                  color: AppColors.textPrimary,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+      trailing: const Icon(Icons.chevron_right),
     );
   }
 }

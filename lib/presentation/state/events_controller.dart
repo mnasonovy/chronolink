@@ -1,7 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../app/notification_service.dart';
+import '../../app/services/notification_service.dart';
 import '../../app/providers.dart';
 import '../../domain/event.dart';
 import '../../domain/event_repository.dart';

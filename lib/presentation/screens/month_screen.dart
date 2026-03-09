@@ -2,6 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../app/router.dart';
+import '../../app/theme/app_colors.dart';
+import '../../app/theme/app_spacing.dart';
 import '../../domain/event.dart';
 import '../state/events_controller.dart';
 import '../state/selected_day_provider.dart';
@@ -14,9 +17,17 @@ class MonthScreen extends ConsumerStatefulWidget {
 }
 
 class _MonthScreenState extends ConsumerState<MonthScreen> {
-  late DateTime _visibleMonth; // всегда 1-е число месяца
+  static const List<String> _weekdayLabels = <String>[
+    'Пн',
+    'Вт',
+    'Ср',
+    'Чт',
+    'Пт',
+    'Сб',
+    'Вс',
+  ];
 
-  static const _weekdaysRu = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'];
+  late DateTime _visibleMonth;
 
   @override
   void initState() {
@@ -48,8 +59,32 @@ class _MonthScreenState extends ConsumerState<MonthScreen> {
     ref.read(selectedDayProvider.notifier).setDay(today);
   }
 
-  String _monthTitleRu(DateTime month) {
-    const months = [
+  DateTime _gridStart(DateTime monthStart) {
+    final shift = monthStart.weekday - DateTime.monday;
+    return monthStart.subtract(Duration(days: shift));
+  }
+
+  List<DateTime> _buildMonthGrid(DateTime visibleMonth) {
+    final monthStart = DateTime(visibleMonth.year, visibleMonth.month, 1);
+    final start = _gridStart(monthStart);
+    return List.generate(42, (index) => start.add(Duration(days: index)));
+  }
+
+  int _eventCountForDay(List<Event> events, DateTime day) {
+    final normalizedDay = dateOnly(day);
+    var count = 0;
+
+    for (final event in events) {
+      if (dateOnly(event.startDateTime) == normalizedDay) {
+        count++;
+      }
+    }
+
+    return count;
+  }
+
+  String _monthTitle(DateTime month) {
+    const months = <String>[
       'Январь',
       'Февраль',
       'Март',
@@ -63,52 +98,35 @@ class _MonthScreenState extends ConsumerState<MonthScreen> {
       'Ноябрь',
       'Декабрь',
     ];
+
     return '${months[month.month - 1]} ${month.year}';
-  }
-
-  DateTime _dateOnly(DateTime dt) => DateTime(dt.year, dt.month, dt.day);
-
-  DateTime _gridStart(DateTime monthStart) {
-    final shift = monthStart.weekday - DateTime.monday; // 0..6
-    return monthStart.subtract(Duration(days: shift));
-  }
-
-  List<DateTime> _buildMonthGrid(DateTime visibleMonth) {
-    final monthStart = DateTime(visibleMonth.year, visibleMonth.month, 1);
-    final start = _gridStart(monthStart);
-    return List.generate(42, (i) => start.add(Duration(days: i)));
-  }
-
-  int _eventCountForDay(List<Event> events, DateTime day) {
-    final d = _dateOnly(day);
-    var count = 0;
-    for (final e in events) {
-      if (_dateOnly(e.startDateTime) == d) count++;
-    }
-    return count;
   }
 
   @override
   Widget build(BuildContext context) {
     final eventsAsync = ref.watch(eventsControllerProvider);
     final selectedDay = ref.watch(selectedDayProvider);
+    final selectedDayNotifier = ref.read(selectedDayProvider.notifier);
 
     final gridDays = _buildMonthGrid(_visibleMonth);
-    final theme = Theme.of(context);
-    final cs = theme.colorScheme;
 
     return Scaffold(
       appBar: AppBar(
         title: const Text('Месяц'),
         actions: [
           IconButton(
+            tooltip: 'Главный экран',
+            onPressed: () => context.go(AppRoute.home),
+            icon: const Icon(Icons.home_outlined),
+          ),
+          IconButton(
             tooltip: 'Неделя',
-            onPressed: () => context.go('/week'),
+            onPressed: () => context.go(AppRoute.week),
             icon: const Icon(Icons.view_week_outlined),
           ),
           IconButton(
             tooltip: 'День',
-            onPressed: () => context.go('/day'),
+            onPressed: () => context.go(AppRoute.day),
             icon: const Icon(Icons.calendar_view_day_outlined),
           ),
           IconButton(
@@ -120,104 +138,86 @@ class _MonthScreenState extends ConsumerState<MonthScreen> {
       ),
       body: SafeArea(
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+          padding: const EdgeInsets.fromLTRB(
+            AppSpacing.lg,
+            AppSpacing.md,
+            AppSpacing.lg,
+            AppSpacing.md,
+          ),
           child: Column(
             children: [
-              Row(
-                children: [
-                  IconButton(
-                    tooltip: 'Предыдущий месяц',
-                    onPressed: _prevMonth,
-                    icon: const Icon(Icons.chevron_left),
-                  ),
-                  Expanded(
-                    child: Center(
-                      child: Text(
-                        _monthTitleRu(_visibleMonth),
-                        style: theme.textTheme.titleMedium?.copyWith(
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                    ),
-                  ),
-                  IconButton(
-                    tooltip: 'Следующий месяц',
-                    onPressed: _nextMonth,
-                    icon: const Icon(Icons.chevron_right),
-                  ),
-                ],
+              _MonthHeader(
+                title: _monthTitle(_visibleMonth),
+                onPrev: _prevMonth,
+                onNext: _nextMonth,
               ),
-              const SizedBox(height: 8),
-
+              const SizedBox(height: AppSpacing.sm),
               Row(
                 children: [
-                  for (final w in _weekdaysRu)
+                  for (final label in _weekdayLabels)
                     Expanded(
                       child: Center(
-                        child: Text(
-                          w,
-                          style: theme.textTheme.bodySmall?.copyWith(
-                            fontWeight: FontWeight.w700,
-                            color: cs.onSurface.withValues(alpha: 0.7),
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 6),
+                          child: Text(
+                            label,
+                            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                              fontWeight: FontWeight.w700,
+                              color: AppColors.textSecondary,
+                            ),
                           ),
                         ),
                       ),
                     ),
                 ],
               ),
-
-              const SizedBox(height: 10),
-
+              const SizedBox(height: AppSpacing.md),
               Expanded(
                 child: eventsAsync.when(
-                  loading: () => const Center(child: CircularProgressIndicator()),
-                  error: (e, _) => Center(child: Text('Ошибка: $e')),
+                  loading: () => const Center(
+                    child: CircularProgressIndicator(),
+                  ),
+                  error: (error, _) => Center(
+                    child: Text('Ошибка: $error'),
+                  ),
                   data: (events) {
                     return GridView.builder(
                       physics: const ClampingScrollPhysics(),
                       itemCount: gridDays.length,
-                      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                      gridDelegate:
+                      const SliverGridDelegateWithFixedCrossAxisCount(
                         crossAxisCount: 7,
-                        mainAxisSpacing: 6,
-                        crossAxisSpacing: 6,
-                        // ✅ чуть более “квадратные” клетки + запас на индикатор
-                        childAspectRatio: 1.05,
+                        mainAxisSpacing: 8,
+                        crossAxisSpacing: 8,
+                        childAspectRatio: 0.9,
                       ),
                       itemBuilder: (context, index) {
                         final day = gridDays[index];
+                        final normalizedDay = dateOnly(day);
 
                         final isCurrentMonth = day.month == _visibleMonth.month;
-                        final isToday = _dateOnly(day) == _dateOnly(DateTime.now());
-                        final isSelected = _dateOnly(day) == _dateOnly(selectedDay);
+                        final isToday = normalizedDay == dateOnly(DateTime.now());
+                        final isSelected = normalizedDay == dateOnly(selectedDay);
 
-                        final count = _eventCountForDay(events, day);
+                        final eventCount = _eventCountForDay(events, day);
 
-                        Color borderColor = cs.outlineVariant;
-                        Color? fillColor;
-
-                        if (isSelected) {
-                          fillColor = cs.primaryContainer.withValues(alpha: 0.55);
-                          borderColor = cs.primary.withValues(alpha: 0.6);
-                        } else if (isToday) {
-                          fillColor = cs.secondaryContainer.withValues(alpha: 0.45);
-                          borderColor = cs.secondary.withValues(alpha: 0.6);
-                        } else {
-                          fillColor = cs.surface.withValues(alpha: 0.0);
-                        }
-
-                        final textColor = isCurrentMonth
-                            ? cs.onSurface
-                            : cs.onSurface.withValues(alpha: 0.35);
+                        final colors = _dayCellColors(
+                          isCurrentMonth: isCurrentMonth,
+                          isToday: isToday,
+                          isSelected: isSelected,
+                        );
 
                         return _DayCell(
                           day: day,
-                          textColor: textColor,
-                          borderColor: borderColor,
-                          fillColor: fillColor,
-                          eventCount: count,
+                          textColor: colors.textColor,
+                          borderColor: colors.borderColor,
+                          fillColor: colors.fillColor,
+                          eventCount: eventCount,
+                          isSelected: isSelected,
+                          isToday: isToday,
                           onTap: () {
-                            ref.read(selectedDayProvider.notifier).setDay(day);
-                            context.go('/day');
+                            selectedDayNotifier.setDay(day);
+                            context.go(AppRoute.day);
                           },
                         );
                       },
@@ -231,6 +231,83 @@ class _MonthScreenState extends ConsumerState<MonthScreen> {
       ),
     );
   }
+
+  _DayCellColors _dayCellColors({
+    required bool isCurrentMonth,
+    required bool isToday,
+    required bool isSelected,
+  }) {
+    Color borderColor = AppColors.border;
+    Color fillColor = AppColors.surface;
+
+    if (isSelected) {
+      fillColor = AppColors.primarySoft;
+      borderColor = AppColors.primary;
+    } else if (isToday) {
+      fillColor = AppColors.todayBadge;
+      borderColor = AppColors.accent;
+    }
+
+    final textColor =
+    isCurrentMonth ? AppColors.textPrimary : AppColors.textMuted;
+
+    return _DayCellColors(
+      borderColor: borderColor,
+      fillColor: fillColor,
+      textColor: textColor,
+    );
+  }
+}
+
+class _MonthHeader extends StatelessWidget {
+  const _MonthHeader({
+    required this.title,
+    required this.onPrev,
+    required this.onNext,
+  });
+
+  final String title;
+  final VoidCallback onPrev;
+  final VoidCallback onNext;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return Container(
+      padding: const EdgeInsets.symmetric(
+        horizontal: AppSpacing.sm,
+        vertical: AppSpacing.sm,
+      ),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(AppSpacing.radiusXl),
+        border: Border.all(color: AppColors.border),
+      ),
+      child: Row(
+        children: [
+          IconButton(
+            tooltip: 'Предыдущий месяц',
+            onPressed: onPrev,
+            icon: const Icon(Icons.chevron_left),
+          ),
+          Expanded(
+            child: Center(
+              child: Text(
+                title,
+                style: theme.textTheme.titleLarge,
+              ),
+            ),
+          ),
+          IconButton(
+            tooltip: 'Следующий месяц',
+            onPressed: onNext,
+            icon: const Icon(Icons.chevron_right),
+          ),
+        ],
+      ),
+    );
+  }
 }
 
 class _DayCell extends StatelessWidget {
@@ -240,100 +317,115 @@ class _DayCell extends StatelessWidget {
     required this.borderColor,
     required this.fillColor,
     required this.eventCount,
+    required this.isSelected,
+    required this.isToday,
     required this.onTap,
   });
 
   final DateTime day;
   final Color textColor;
   final Color borderColor;
-  final Color? fillColor;
+  final Color fillColor;
   final int eventCount;
+  final bool isSelected;
+  final bool isToday;
   final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final cs = theme.colorScheme;
-
-    String badgeText(int c) {
-      if (c <= 1) return '';
-      if (c >= 10) return '9+';
-      return '$c';
-    }
 
     return InkWell(
-      borderRadius: BorderRadius.circular(14),
+      borderRadius: BorderRadius.circular(AppSpacing.radiusLg),
       onTap: onTap,
       child: Ink(
+        padding: const EdgeInsets.all(8),
         decoration: BoxDecoration(
           color: fillColor,
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: borderColor),
+          borderRadius: BorderRadius.circular(AppSpacing.radiusLg),
+          border: Border.all(
+            color: borderColor,
+            width: isSelected ? 1.5 : (isToday ? 1.2 : 1),
+          ),
         ),
-        padding: const EdgeInsets.all(6),
         child: Stack(
-          clipBehavior: Clip.hardEdge, // ✅ чтобы ничто не вылезало наружу
           children: [
-            Align(
-              alignment: Alignment.topLeft,
-              child: FittedBox(
-                fit: BoxFit.scaleDown,
-                child: Text(
-                  '${day.day}',
-                  style: theme.textTheme.titleSmall?.copyWith(
-                    color: textColor,
-                    fontWeight: FontWeight.w700,
-                  ),
+            Positioned(
+              top: 0,
+              left: 0,
+              child: Text(
+                '${day.day}',
+                style: theme.textTheme.titleSmall?.copyWith(
+                  color: textColor,
+                  fontWeight: FontWeight.w700,
                 ),
               ),
             ),
-
+            if (isToday && !isSelected)
+              Positioned(
+                top: 0,
+                right: 0,
+                child: Container(
+                  width: 8,
+                  height: 8,
+                  decoration: const BoxDecoration(
+                    color: AppColors.accent,
+                    shape: BoxShape.circle,
+                  ),
+                ),
+              ),
             if (eventCount > 0)
               Positioned(
-                right: 4,
-                bottom: 4,
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Container(
-                      width: 7,
-                      height: 7,
-                      decoration: BoxDecoration(
-                        color: cs.primary.withValues(alpha: 0.9),
-                        shape: BoxShape.circle,
-                      ),
-                    ),
-                    if (eventCount > 1) ...[
-                      const SizedBox(width: 5),
-                      ConstrainedBox(
-                        // ✅ ключ: ограничиваем ширину, чтобы не было RIGHT OVERFLOWED
-                        constraints: const BoxConstraints(maxWidth: 22),
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                          decoration: BoxDecoration(
-                            color: cs.primary.withValues(alpha: 0.12),
-                            borderRadius: BorderRadius.circular(999),
-                            border: Border.all(color: cs.primary.withValues(alpha: 0.25)),
-                          ),
-                          child: FittedBox(
-                            fit: BoxFit.scaleDown,
-                            child: Text(
-                              badgeText(eventCount),
-                              style: theme.textTheme.labelSmall?.copyWith(
-                                color: cs.primary,
-                                fontWeight: FontWeight.w800,
-                              ),
-                            ),
-                          ),
-                        ),
-                      ),
-                    ],
-                  ],
-                ),
+                right: 0,
+                bottom: 0,
+                child: _EventDotsIndicator(count: eventCount),
               ),
           ],
         ),
       ),
     );
   }
+}
+
+class _EventDotsIndicator extends StatelessWidget {
+  const _EventDotsIndicator({
+    required this.count,
+  });
+
+  final int count;
+
+  @override
+  Widget build(BuildContext context) {
+    final dotsCount = count >= 3 ? 3 : count;
+
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: List.generate(
+        dotsCount,
+            (index) => Padding(
+          padding: EdgeInsets.only(left: index == 0 ? 0 : 3),
+          child: Container(
+            width: 6,
+            height: 6,
+            decoration: const BoxDecoration(
+              color: AppColors.primary,
+              shape: BoxShape.circle,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _DayCellColors {
+  const _DayCellColors({
+    required this.borderColor,
+    required this.fillColor,
+    required this.textColor,
+  });
+
+  final Color borderColor;
+  final Color fillColor;
+  final Color textColor;
 }

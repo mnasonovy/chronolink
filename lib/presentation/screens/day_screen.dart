@@ -2,7 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
-import '../../app/notification_service.dart';
+import '../../app/router.dart';
+import '../../app/theme/app_colors.dart';
+import '../../app/theme/app_spacing.dart';
+import '../../app/utils/date_format.dart';
 import '../../domain/event.dart';
 import '../state/events_controller.dart';
 import '../state/selected_day_provider.dart';
@@ -11,18 +14,22 @@ import 'event_editor_screen.dart';
 class DayScreen extends ConsumerWidget {
   const DayScreen({super.key});
 
+  static const int _defaultStartOffsetMinutes = 10;
+  static const int _defaultDurationMinutes = 30;
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final eventsAsync = ref.watch(eventsControllerProvider);
     final selectedDay = ref.watch(selectedDayProvider);
-    final selectedDayCtrl = ref.read(selectedDayProvider.notifier);
+    final selectedDayNotifier = ref.read(selectedDayProvider.notifier);
 
     final dayLabel = formatDate(selectedDay);
-    final weekdayLabel = formatWeekday(selectedDay);
+    final weekdayLabel = _formatWeekday(selectedDay);
 
     Future<void> openCreateEvent() async {
-      // Старт = текущее время + 10 минут, но дата = выбранный день
-      final base = DateTime.now().add(const Duration(minutes: 10));
+      final base = DateTime.now().add(
+        const Duration(minutes: _defaultStartOffsetMinutes),
+      );
 
       final initialStart = DateTime(
         selectedDay.year,
@@ -32,7 +39,9 @@ class DayScreen extends ConsumerWidget {
         base.minute,
       );
 
-      final initialEnd = initialStart.add(const Duration(minutes: 30));
+      final initialEnd = initialStart.add(
+        const Duration(minutes: _defaultDurationMinutes),
+      );
 
       await Navigator.of(context).push(
         MaterialPageRoute(
@@ -44,55 +53,37 @@ class DayScreen extends ConsumerWidget {
       );
     }
 
+    Future<void> openEditEvent(Event event) async {
+      await Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => EventEditorScreen(initialEvent: event),
+        ),
+      );
+    }
+
     return Scaffold(
       appBar: AppBar(
         title: const Text('День'),
         actions: [
-          // ✅ навигация как в Month/Week (в AppBar)
+          IconButton(
+            tooltip: 'Главный экран',
+            onPressed: () => context.go(AppRoute.home),
+            icon: const Icon(Icons.home_outlined),
+          ),
           IconButton(
             tooltip: 'Месяц',
-            onPressed: () => context.go('/month'),
+            onPressed: () => context.go(AppRoute.month),
             icon: const Icon(Icons.calendar_month_outlined),
           ),
           IconButton(
             tooltip: 'Неделя',
-            onPressed: () => context.go('/week'),
+            onPressed: () => context.go(AppRoute.week),
             icon: const Icon(Icons.view_week_outlined),
           ),
-
-          // ✅ Today: единая иконка как в Month
           IconButton(
             tooltip: 'Сегодня',
-            onPressed: selectedDayCtrl.today,
+            onPressed: selectedDayNotifier.today,
             icon: const Icon(Icons.my_location_outlined),
-          ),
-
-          // Тест уведомлений оставляем (короткий тап = заглушка, лонг = тест)
-          IconButton(
-            tooltip: 'Уведомления (удерживай для теста)',
-            onPressed: () {
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('Настройки уведомлений — скоро')),
-              );
-            },
-            onLongPress: () {
-              NotificationService.showInstant(
-                id: DateTime.now().millisecondsSinceEpoch % 100000,
-                title: 'Chronolink',
-                body: 'Instant OK',
-              );
-              NotificationService.debugScheduleIn20s();
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('Тест: instant + schedule(20s) отправлены')),
-              );
-            },
-            icon: const Icon(Icons.notifications_active_outlined),
-          ),
-
-          IconButton(
-            tooltip: 'Удалить все события',
-            onPressed: () => confirmDeleteAll(context, ref),
-            icon: const Icon(Icons.delete_outline),
           ),
         ],
       ),
@@ -103,51 +94,56 @@ class DayScreen extends ConsumerWidget {
       ),
       body: SafeArea(
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+          padding: const EdgeInsets.fromLTRB(
+            AppSpacing.lg,
+            AppSpacing.md,
+            AppSpacing.lg,
+            0,
+          ),
           child: Column(
             children: [
-              TopBar(
+              _TopBar(
                 dayLabel: dayLabel,
                 weekdayLabel: weekdayLabel,
-                onPrev: selectedDayCtrl.prevDay,
-                onNext: selectedDayCtrl.nextDay,
-                onPick: () => pickDate(context, ref, selectedDay),
+                onPrev: selectedDayNotifier.prevDay,
+                onNext: selectedDayNotifier.nextDay,
+                onPick: () => _pickDate(context, ref, selectedDay),
               ),
-              const SizedBox(height: 12),
+              const SizedBox(height: AppSpacing.md),
               Expanded(
                 child: eventsAsync.when(
                   data: (events) {
-                    final filtered = events.where((e) {
-                      return dateOnly(e.startDateTime) == selectedDay;
-                    }).toList()
-                      ..sort((a, b) => a.startDateTime.compareTo(b.startDateTime));
+                    final filteredEvents = events
+                        .where(
+                          (event) => dateOnly(event.startDateTime) == selectedDay,
+                    )
+                        .toList()
+                      ..sort(
+                            (a, b) => a.startDateTime.compareTo(b.startDateTime),
+                      );
 
-                    return EventsList(
+                    return _EventsList(
                       selectedDay: selectedDay,
-                      events: filtered,
+                      events: filteredEvents,
                       onDelete: (id) async {
-                        // deleteById уже отменяет напоминание внутри controller,
-                        // но пусть будет доп. страховка (не мешает).
-                        await ref.read(eventsControllerProvider.notifier).deleteById(id);
+                        await ref
+                            .read(eventsControllerProvider.notifier)
+                            .deleteById(id);
                       },
-                      onTap: (event) async {
-                        await Navigator.of(context).push(
-                          MaterialPageRoute(
-                            builder: (_) => EventEditorScreen(initialEvent: event),
-                          ),
-                        );
-                      },
+                      onTap: openEditEvent,
                       onAdd: openCreateEvent,
                     );
                   },
-                  loading: () => const Center(child: CircularProgressIndicator()),
-                  error: (e, st) => ErrorState(
-                    message: 'Ошибка загрузки событий: $e',
+                  loading: () => const Center(
+                    child: CircularProgressIndicator(),
+                  ),
+                  error: (error, stackTrace) => _ErrorState(
+                    message: 'Ошибка загрузки событий: $error',
                     onRetry: () => ref.invalidate(eventsControllerProvider),
                   ),
                 ),
               ),
-              const SizedBox(height: 12),
+              const SizedBox(height: AppSpacing.md),
             ],
           ),
         ),
@@ -155,7 +151,7 @@ class DayScreen extends ConsumerWidget {
     );
   }
 
-  static Future<void> pickDate(
+  static Future<void> _pickDate(
       BuildContext context,
       WidgetRef ref,
       DateTime selectedDay,
@@ -167,38 +163,28 @@ class DayScreen extends ConsumerWidget {
       lastDate: DateTime(2100),
       helpText: 'Выбери дату',
     );
+
     if (picked == null) return;
+
     ref.read(selectedDayProvider.notifier).setDay(dateOnly(picked));
   }
 
-  static Future<void> confirmDeleteAll(BuildContext context, WidgetRef ref) async {
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Удалить всё?'),
-        content: const Text('Все события и напоминания будут удалены. Отменить нельзя.'),
-        actions: [
-          TextButton(onPressed: () => Navigator.of(ctx).pop(false), child: const Text('Отмена')),
-          FilledButton(onPressed: () => Navigator.of(ctx).pop(true), child: const Text('Удалить')),
-        ],
-      ),
-    );
-
-    if (ok != true) return;
-
-    await ref.read(eventsControllerProvider.notifier).deleteAll();
-
-    if (context.mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Всё удалено')),
-      );
-    }
+  static String _formatWeekday(DateTime dt) {
+    const names = [
+      'Понедельник',
+      'Вторник',
+      'Среда',
+      'Четверг',
+      'Пятница',
+      'Суббота',
+      'Воскресенье',
+    ];
+    return names[dt.weekday - 1];
   }
 }
 
-class TopBar extends StatelessWidget {
-  const TopBar({
-    super.key,
+class _TopBar extends StatelessWidget {
+  const _TopBar({
     required this.dayLabel,
     required this.weekdayLabel,
     required this.onPrev,
@@ -216,48 +202,74 @@ class TopBar extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
 
-    return Row(
-      children: [
-        IconButton(
-          tooltip: 'Предыдущий день',
-          onPressed: onPrev,
-          icon: const Icon(Icons.chevron_left),
-        ),
-        Expanded(
-          child: InkWell(
-            borderRadius: BorderRadius.circular(12),
-            onTap: onPick,
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.center,
-                children: [
-                  Text(dayLabel, style: theme.textTheme.titleMedium),
-                  const SizedBox(height: 2),
-                  Text(
-                    weekdayLabel,
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      color: theme.colorScheme.onSurfaceVariant,
+    return Container(
+      padding: const EdgeInsets.symmetric(
+        horizontal: AppSpacing.sm,
+        vertical: AppSpacing.sm,
+      ),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(AppSpacing.radiusXl),
+        border: Border.all(color: AppColors.border),
+      ),
+      child: Row(
+        children: [
+          IconButton(
+            tooltip: 'Предыдущий день',
+            onPressed: onPrev,
+            icon: const Icon(Icons.chevron_left),
+          ),
+          Expanded(
+            child: InkWell(
+              borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
+              onTap: onPick,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: AppSpacing.md,
+                  vertical: AppSpacing.sm,
+                ),
+                child: Column(
+                  children: [
+                    Text(
+                      dayLabel,
+                      style: theme.textTheme.titleLarge,
                     ),
-                  ),
-                ],
+                    const SizedBox(height: AppSpacing.xs),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: AppSpacing.md,
+                        vertical: 6,
+                      ),
+                      decoration: BoxDecoration(
+                        color: AppColors.todayBadge,
+                        borderRadius: BorderRadius.circular(999),
+                      ),
+                      child: Text(
+                        weekdayLabel,
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: AppColors.textSecondary,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ),
           ),
-        ),
-        IconButton(
-          tooltip: 'Следующий день',
-          onPressed: onNext,
-          icon: const Icon(Icons.chevron_right),
-        ),
-      ],
+          IconButton(
+            tooltip: 'Следующий день',
+            onPressed: onNext,
+            icon: const Icon(Icons.chevron_right),
+          ),
+        ],
+      ),
     );
   }
 }
 
-class EventsList extends StatelessWidget {
-  const EventsList({
-    super.key,
+class _EventsList extends StatelessWidget {
+  const _EventsList({
     required this.selectedDay,
     required this.events,
     required this.onDelete,
@@ -274,32 +286,30 @@ class EventsList extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (events.isEmpty) {
-      return EmptyState(
+      return _EmptyState(
         dayLabel: formatDate(selectedDay),
         onAdd: onAdd,
       );
     }
 
     return ListView.separated(
-      // ✅ запас снизу под FAB, чтобы ничего не перекрывалось
       padding: const EdgeInsets.fromLTRB(0, 0, 0, 110),
       itemCount: events.length,
-      separatorBuilder: (_, __) => const SizedBox(height: 10),
+      separatorBuilder: (_, __) => const SizedBox(height: AppSpacing.md),
       itemBuilder: (context, index) {
-        final e = events[index];
-        return EventCard(
-          event: e,
-          onTap: () => onTap(e),
-          onDelete: () => onDelete(e.id),
+        final event = events[index];
+        return _EventCard(
+          event: event,
+          onTap: () => onTap(event),
+          onDelete: () => onDelete(event.id),
         );
       },
     );
   }
 }
 
-class EventCard extends StatelessWidget {
-  const EventCard({
-    super.key,
+class _EventCard extends StatelessWidget {
+  const _EventCard({
     required this.event,
     required this.onTap,
     required this.onDelete,
@@ -317,30 +327,27 @@ class EventCard extends StatelessWidget {
         ? 'Весь день'
         : '${formatTime(event.startDateTime)} — ${formatTime(event.endDateTime)}';
 
-    final reminder = event.reminderBeforeMinutes;
-    final reminderText = reminder == null
-        ? null
-        : (reminder == 0 ? 'Сейчас' : 'За $reminder мин');
+    final reminderText = _buildReminderText(event.reminderBeforeMinutes);
+    final description = event.description?.trim();
 
     return Card(
-      elevation: 0,
       child: InkWell(
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(AppSpacing.radiusXl),
         onTap: onTap,
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(14, 12, 8, 12),
+          padding: const EdgeInsets.all(AppSpacing.lg),
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Container(
-                width: 6,
-                height: 44,
+                width: 8,
+                constraints: const BoxConstraints(minHeight: 72),
                 decoration: BoxDecoration(
-                  color: theme.colorScheme.primary.withValues(alpha: 0.75),
-                  borderRadius: BorderRadius.circular(6),
+                  color: AppColors.primary,
+                  borderRadius: BorderRadius.circular(999),
                 ),
               ),
-              const SizedBox(width: 12),
+              const SizedBox(width: AppSpacing.md),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -351,37 +358,48 @@ class EventCard extends StatelessWidget {
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                     ),
-                    const SizedBox(height: 4),
+                    const SizedBox(height: AppSpacing.xs),
                     Text(
                       timeText,
                       style: theme.textTheme.bodyMedium?.copyWith(
-                        color: theme.colorScheme.onSurfaceVariant,
+                        color: AppColors.textSecondary,
                       ),
                     ),
-                    if ((event.description ?? '').trim().isNotEmpty) ...[
-                      const SizedBox(height: 6),
+                    if (description != null && description.isNotEmpty) ...[
+                      const SizedBox(height: AppSpacing.sm),
                       Text(
-                        event.description!.trim(),
+                        description,
                         style: theme.textTheme.bodySmall?.copyWith(
-                          color: theme.colorScheme.onSurfaceVariant,
+                          color: AppColors.textSecondary,
                         ),
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis,
                       ),
                     ],
                     if (reminderText != null) ...[
-                      const SizedBox(height: 8),
-                      Align(
-                        alignment: Alignment.centerLeft,
-                        child: Chip(
-                          label: Text('Напоминание: $reminderText'),
-                          visualDensity: VisualDensity.compact,
+                      const SizedBox(height: AppSpacing.md),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: AppSpacing.md,
+                          vertical: AppSpacing.sm,
+                        ),
+                        decoration: BoxDecoration(
+                          color: AppColors.primarySoft,
+                          borderRadius: BorderRadius.circular(999),
+                        ),
+                        child: Text(
+                          'Напоминание: $reminderText',
+                          style: theme.textTheme.labelSmall?.copyWith(
+                            color: AppColors.textPrimary,
+                            fontWeight: FontWeight.w700,
+                          ),
                         ),
                       ),
                     ],
                   ],
                 ),
               ),
+              const SizedBox(width: AppSpacing.sm),
               IconButton(
                 tooltip: 'Удалить',
                 onPressed: onDelete,
@@ -393,11 +411,20 @@ class EventCard extends StatelessWidget {
       ),
     );
   }
+
+  String? _buildReminderText(int? reminderMinutes) {
+    if (reminderMinutes == null) return null;
+    if (reminderMinutes == 0) return 'В момент начала';
+    if (reminderMinutes == 1) return 'За 1 минуту';
+    if (reminderMinutes >= 2 && reminderMinutes <= 4) {
+      return 'За $reminderMinutes минуты';
+    }
+    return 'За $reminderMinutes минут';
+  }
 }
 
-class EmptyState extends StatelessWidget {
-  const EmptyState({
-    super.key,
+class _EmptyState extends StatelessWidget {
+  const _EmptyState({
     required this.dayLabel,
     required this.onAdd,
   });
@@ -411,32 +438,40 @@ class EmptyState extends StatelessWidget {
 
     return Center(
       child: Padding(
-        padding: const EdgeInsets.all(24),
+        padding: const EdgeInsets.all(AppSpacing.xl),
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(
-              Icons.event_available_outlined,
-              size: 56,
-              color: theme.colorScheme.onSurfaceVariant,
+            Container(
+              width: 88,
+              height: 88,
+              decoration: const BoxDecoration(
+                color: AppColors.surfaceSoft,
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(
+                Icons.event_available_outlined,
+                size: 42,
+                color: AppColors.primary,
+              ),
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: AppSpacing.lg),
             Text(
               'На $dayLabel событий нет',
-              style: theme.textTheme.titleMedium,
+              style: theme.textTheme.titleLarge,
               textAlign: TextAlign.center,
             ),
-            const SizedBox(height: 6),
+            const SizedBox(height: AppSpacing.sm),
             Text(
-              'Нажми “+”, чтобы добавить первое.',
+              'Нажми на “+”, чтобы добавить первое событие.',
               style: theme.textTheme.bodyMedium?.copyWith(
-                color: theme.colorScheme.onSurfaceVariant,
+                color: AppColors.textSecondary,
               ),
               textAlign: TextAlign.center,
             ),
-            const SizedBox(height: 14),
+            const SizedBox(height: AppSpacing.lg),
             FilledButton.icon(
-              onPressed: () => onAdd(),
+              onPressed: onAdd,
               icon: const Icon(Icons.add),
               label: const Text('Добавить событие'),
             ),
@@ -447,9 +482,8 @@ class EmptyState extends StatelessWidget {
   }
 }
 
-class ErrorState extends StatelessWidget {
-  const ErrorState({
-    super.key,
+class _ErrorState extends StatelessWidget {
+  const _ErrorState({
     required this.message,
     required this.onRetry,
   });
@@ -463,22 +497,22 @@ class ErrorState extends StatelessWidget {
 
     return Center(
       child: Padding(
-        padding: const EdgeInsets.all(24),
+        padding: const EdgeInsets.all(AppSpacing.xl),
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(
+            const Icon(
               Icons.error_outline,
               size: 48,
-              color: theme.colorScheme.error,
+              color: AppColors.error,
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: AppSpacing.md),
             Text(
               message,
               style: theme.textTheme.bodyMedium,
               textAlign: TextAlign.center,
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: AppSpacing.md),
             OutlinedButton.icon(
               onPressed: onRetry,
               icon: const Icon(Icons.refresh),
@@ -489,34 +523,4 @@ class ErrorState extends StatelessWidget {
       ),
     );
   }
-}
-
-// -------- helpers (RU) --------
-
-DateTime dateOnly(DateTime dt) => DateTime(dt.year, dt.month, dt.day);
-
-String formatDate(DateTime dt) {
-  final dd = dt.day.toString().padLeft(2, '0');
-  final mm = dt.month.toString().padLeft(2, '0');
-  final yyyy = dt.year.toString();
-  return '$dd.$mm.$yyyy';
-}
-
-String formatTime(DateTime dt) {
-  final hh = dt.hour.toString().padLeft(2, '0');
-  final min = dt.minute.toString().padLeft(2, '0');
-  return '$hh:$min';
-}
-
-String formatWeekday(DateTime dt) {
-  const names = [
-    'Понедельник',
-    'Вторник',
-    'Среда',
-    'Четверг',
-    'Пятница',
-    'Суббота',
-    'Воскресенье',
-  ];
-  return names[dt.weekday - 1];
 }

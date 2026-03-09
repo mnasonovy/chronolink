@@ -5,70 +5,68 @@ import '../domain/event_repository.dart';
 import 'hive_event.dart';
 
 class HiveEventRepository implements EventRepository {
-  static const _boxName = 'events';
+  static const String _boxName = 'events';
+  static const int _adapterTypeId = 1;
 
   Future<Box<HiveEvent>> _openBox() async {
-    if (!Hive.isAdapterRegistered(1)) {
+    if (!Hive.isAdapterRegistered(_adapterTypeId)) {
       Hive.registerAdapter(HiveEventAdapter());
     }
+
+    if (Hive.isBoxOpen(_boxName)) {
+      return Hive.box<HiveEvent>(_boxName);
+    }
+
     return Hive.openBox<HiveEvent>(_boxName);
   }
 
   @override
   Future<List<Event>> getAll() async {
     final box = await _openBox();
-    final list = box.values.map(_toDomain).toList()
+
+    final events = box.values
+        .map(_toDomain)
+        .toList()
       ..sort((a, b) => a.startDateTime.compareTo(b.startDateTime));
-    return list;
+
+    return events;
   }
 
   @override
   Future<Event?> getById(String id) async {
     final box = await _openBox();
-    for (final hiveEvent in box.values) {
-      if (hiveEvent.id == id) return _toDomain(hiveEvent);
-    }
-    return null;
+    final key = _findKeyByEventId(box, id);
+
+    if (key == null) return null;
+
+    final hiveEvent = box.get(key);
+    if (hiveEvent == null) return null;
+
+    return _toDomain(hiveEvent);
   }
 
   @override
   Future<void> upsert(Event event) async {
     final box = await _openBox();
-
-    dynamic existingKey;
-    for (final k in box.keys) {
-      final item = box.get(k);
-      if (item?.id == event.id) {
-        existingKey = k;
-        break;
-      }
-    }
-
+    final key = _findKeyByEventId(box, event.id);
     final hiveEvent = _fromDomain(event);
 
-    if (existingKey == null) {
+    if (key == null) {
       await box.add(hiveEvent);
-    } else {
-      await box.put(existingKey, hiveEvent);
+      return;
     }
+
+    await box.put(key, hiveEvent);
   }
 
   @override
   Future<void> deleteById(String id) async {
     final box = await _openBox();
+    final key = _findKeyByEventId(box, id);
 
-    dynamic keyToDelete;
-    for (final k in box.keys) {
-      final item = box.get(k);
-      if (item?.id == id) {
-        keyToDelete = k;
-        break;
-      }
-    }
+    if (key == null) return;
 
-    if (keyToDelete != null) {
-      await box.delete(keyToDelete);
-    }
+    await box.delete(key);
   }
 
   @override
@@ -77,28 +75,41 @@ class HiveEventRepository implements EventRepository {
     await box.clear();
   }
 
-  // mappers
-  Event _toDomain(HiveEvent e) => Event(
-    id: e.id,
-    title: e.title,
-    description: e.description,
-    startDateTime: e.startDateTime,
-    endDateTime: e.endDateTime,
-    allDay: e.allDay,
-    reminderBeforeMinutes: e.reminderBeforeMinutes,
-    createdAt: e.createdAt,
-    updatedAt: e.updatedAt,
-  );
+  dynamic _findKeyByEventId(Box<HiveEvent> box, String eventId) {
+    for (final key in box.keys) {
+      final item = box.get(key);
+      if (item?.id == eventId) {
+        return key;
+      }
+    }
+    return null;
+  }
 
-  HiveEvent _fromDomain(Event e) => HiveEvent(
-    id: e.id,
-    title: e.title,
-    description: e.description,
-    startDateTime: e.startDateTime,
-    endDateTime: e.endDateTime,
-    allDay: e.allDay,
-    reminderBeforeMinutes: e.reminderBeforeMinutes,
-    createdAt: e.createdAt,
-    updatedAt: e.updatedAt,
-  );
+  Event _toDomain(HiveEvent event) {
+    return Event(
+      id: event.id,
+      title: event.title,
+      description: event.description,
+      startDateTime: event.startDateTime,
+      endDateTime: event.endDateTime,
+      allDay: event.allDay,
+      reminderBeforeMinutes: event.reminderBeforeMinutes,
+      createdAt: event.createdAt,
+      updatedAt: event.updatedAt,
+    );
+  }
+
+  HiveEvent _fromDomain(Event event) {
+    return HiveEvent(
+      id: event.id,
+      title: event.title,
+      description: event.description,
+      startDateTime: event.startDateTime,
+      endDateTime: event.endDateTime,
+      allDay: event.allDay,
+      reminderBeforeMinutes: event.reminderBeforeMinutes,
+      createdAt: event.createdAt,
+      updatedAt: event.updatedAt,
+    );
+  }
 }

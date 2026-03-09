@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../app/router.dart';
+import '../../app/utils/date_format.dart';
 import '../../domain/event.dart';
 import '../state/events_controller.dart';
 import '../state/selected_day_provider.dart';
@@ -9,72 +11,40 @@ import '../state/selected_day_provider.dart';
 class WeekScreen extends ConsumerWidget {
   const WeekScreen({super.key});
 
-  DateTime _dateOnly(DateTime dt) => DateTime(dt.year, dt.month, dt.day);
-
-  DateTime _startOfWeekMonday(DateTime day) {
-    final d = _dateOnly(day);
-    return d.subtract(Duration(days: d.weekday - DateTime.monday));
-  }
-
-  String _weekdayLabel(int weekday) {
-    switch (weekday) {
-      case DateTime.monday:
-        return 'Пн';
-      case DateTime.tuesday:
-        return 'Вт';
-      case DateTime.wednesday:
-        return 'Ср';
-      case DateTime.thursday:
-        return 'Чт';
-      case DateTime.friday:
-        return 'Пт';
-      case DateTime.saturday:
-        return 'Сб';
-      case DateTime.sunday:
-        return 'Вс';
-      default:
-        return '';
-    }
-  }
-
-  String _dateLabel(DateTime d) {
-    final dd = d.day.toString().padLeft(2, '0');
-    final mm = d.month.toString().padLeft(2, '0');
-    return '$dd.$mm';
-  }
-
-  String _timeLabel(DateTime dt) {
-    final hh = dt.hour.toString().padLeft(2, '0');
-    final mm = dt.minute.toString().padLeft(2, '0');
-    return '$hh:$mm';
-  }
-
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final eventsAsync = ref.watch(eventsControllerProvider);
     final selectedDay = ref.watch(selectedDayProvider);
-    final selectedDayCtrl = ref.read(selectedDayProvider.notifier);
+    final selectedDayNotifier = ref.read(selectedDayProvider.notifier);
 
     final weekStart = _startOfWeekMonday(selectedDay);
-    final days = List.generate(7, (i) => weekStart.add(Duration(days: i)));
+    final weekDays = List.generate(
+      7,
+          (index) => weekStart.add(Duration(days: index)),
+    );
 
     return Scaffold(
       appBar: AppBar(
         title: const Text('Неделя'),
         actions: [
           IconButton(
+            tooltip: 'Главный экран',
+            onPressed: () => context.go(AppRoute.home),
+            icon: const Icon(Icons.home_outlined),
+          ),
+          IconButton(
             tooltip: 'Месяц',
-            onPressed: () => context.go('/month'),
+            onPressed: () => context.go(AppRoute.month),
             icon: const Icon(Icons.calendar_month_outlined),
           ),
           IconButton(
             tooltip: 'День',
-            onPressed: () => context.go('/day'),
+            onPressed: () => context.go(AppRoute.day),
             icon: const Icon(Icons.calendar_view_day_outlined),
           ),
           IconButton(
             tooltip: 'Сегодня',
-            onPressed: selectedDayCtrl.today,
+            onPressed: selectedDayNotifier.today,
             icon: const Icon(Icons.my_location_outlined),
           ),
         ],
@@ -86,69 +56,55 @@ class WeekScreen extends ConsumerWidget {
             children: [
               _WeekHeader(
                 weekStart: weekStart,
-                onPrev: selectedDayCtrl.prevWeek,
-                onNext: selectedDayCtrl.nextWeek,
+                onPrev: selectedDayNotifier.prevWeek,
+                onNext: selectedDayNotifier.nextWeek,
               ),
               const SizedBox(height: 10),
-
-              // ✅ КЛЮЧЕВАЯ ПРАВКА: ClipRect чтобы список НЕ рисовался поверх шапки при overscroll
               Expanded(
                 child: ClipRect(
                   child: eventsAsync.when(
                     data: (events) {
-                      final byDay = <DateTime, List<Event>>{};
-                      for (final d in days) {
-                        byDay[_dateOnly(d)] = <Event>[];
-                      }
-
-                      for (final e in events) {
-                        final d = _dateOnly(e.startDateTime);
-                        if (byDay.containsKey(d)) {
-                          byDay[d]!.add(e);
-                        }
-                      }
-
-                      for (final entry in byDay.entries) {
-                        entry.value.sort((a, b) => a.startDateTime.compareTo(b.startDateTime));
-                      }
+                      final eventsByDay = _groupEventsByDay(
+                        events: events,
+                        weekDays: weekDays,
+                      );
 
                       return ListView.separated(
-                        // ✅ чтобы FAB не перекрывал нижние элементы
                         padding: const EdgeInsets.only(bottom: 96),
-                        // ✅ убираем bounce-поведение, из-за которого "вылезает" вверх
                         physics: const ClampingScrollPhysics(),
-                        itemCount: days.length,
-                        separatorBuilder: (_, __) => const SizedBox(height: 10),
+                        itemCount: weekDays.length,
+                        separatorBuilder: (_, __) =>
+                        const SizedBox(height: 10),
                         itemBuilder: (context, index) {
-                          final day = days[index];
-                          final key = _dateOnly(day);
-                          final list = byDay[key] ?? const <Event>[];
+                          final day = weekDays[index];
+                          final dayKey = dateOnly(day);
+                          final dayEvents = eventsByDay[dayKey] ?? const <Event>[];
 
-                          final isSelected = _dateOnly(selectedDay) == key;
-                          final isToday = _dateOnly(DateTime.now()) == key;
+                          final isSelected = dateOnly(selectedDay) == dayKey;
+                          final isToday = dateOnly(DateTime.now()) == dayKey;
 
                           return _DayBlock(
-                            day: day,
-                            weekdayText: _weekdayLabel(day.weekday),
-                            dateText: _dateLabel(day),
+                            weekdayText: _shortWeekday(day),
+                            dateText: _shortDate(day),
                             isSelected: isSelected,
                             isToday: isToday,
-                            events: list,
-                            timeLabel: _timeLabel,
+                            events: dayEvents,
                             onOpenDay: () {
-                              selectedDayCtrl.setDay(day);
-                              context.go('/day');
+                              selectedDayNotifier.setDay(day);
+                              context.go(AppRoute.day);
                             },
                             onOpenEvent: (event) async {
-                              selectedDayCtrl.setDay(day);
-                              context.go('/day');
+                              selectedDayNotifier.setDay(day);
+                              context.go(AppRoute.day);
                             },
                           );
                         },
                       );
                     },
-                    loading: () => const Center(child: CircularProgressIndicator()),
-                    error: (e, st) => Center(child: Text('Ошибка: $e')),
+                    loading: () =>
+                    const Center(child: CircularProgressIndicator()),
+                    error: (error, stackTrace) =>
+                        Center(child: Text('Ошибка: $error')),
                   ),
                 ),
               ),
@@ -156,14 +112,54 @@ class WeekScreen extends ConsumerWidget {
           ),
         ),
       ),
-
-      // ✅ по твоему пункту: убрать "Событие", оставить просто +
       floatingActionButton: FloatingActionButton(
         tooltip: 'Добавить событие',
-        onPressed: () => context.go('/day'),
+        onPressed: () => context.go(AppRoute.day),
         child: const Icon(Icons.add),
       ),
     );
+  }
+
+  static Map<DateTime, List<Event>> _groupEventsByDay({
+    required List<Event> events,
+    required List<DateTime> weekDays,
+  }) {
+    final result = <DateTime, List<Event>>{
+      for (final day in weekDays) dateOnly(day): <Event>[],
+    };
+
+    for (final event in events) {
+      final eventDay = dateOnly(event.startDateTime);
+      if (result.containsKey(eventDay)) {
+        result[eventDay]!.add(event);
+      }
+    }
+
+    for (final dayEvents in result.values) {
+      dayEvents.sort(
+            (a, b) => a.startDateTime.compareTo(b.startDateTime),
+      );
+    }
+
+    return result;
+  }
+
+  static DateTime _startOfWeekMonday(DateTime day) {
+    final normalized = dateOnly(day);
+    return normalized.subtract(
+      Duration(days: normalized.weekday - DateTime.monday),
+    );
+  }
+
+  static String _shortWeekday(DateTime day) {
+    const labels = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'];
+    return labels[day.weekday - 1];
+  }
+
+  static String _shortDate(DateTime day) {
+    final dd = day.day.toString().padLeft(2, '0');
+    final mm = day.month.toString().padLeft(2, '0');
+    return '$dd.$mm';
   }
 }
 
@@ -178,24 +174,13 @@ class _WeekHeader extends StatelessWidget {
   final VoidCallback onPrev;
   final VoidCallback onNext;
 
-  String _rangeLabel(DateTime start) {
-    final end = start.add(const Duration(days: 6));
-    String fmt(DateTime d) {
-      final dd = d.day.toString().padLeft(2, '0');
-      final mm = d.month.toString().padLeft(2, '0');
-      return '$dd.$mm';
-    }
-
-    return '${fmt(start)} — ${fmt(end)}';
-  }
-
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
 
     return Material(
-      borderRadius: BorderRadius.circular(16),
       color: theme.colorScheme.surface,
+      borderRadius: BorderRadius.circular(16),
       child: Container(
         padding: const EdgeInsets.fromLTRB(8, 8, 8, 10),
         decoration: BoxDecoration(
@@ -214,8 +199,10 @@ class _WeekHeader extends StatelessWidget {
                 Expanded(
                   child: Center(
                     child: Text(
-                      _rangeLabel(weekStart),
-                      style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
+                      _weekRangeLabel(weekStart),
+                      style: theme.textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.w700,
+                      ),
                     ),
                   ),
                 ),
@@ -227,15 +214,15 @@ class _WeekHeader extends StatelessWidget {
               ],
             ),
             const SizedBox(height: 4),
-            Row(
-              children: const [
-                _W('Пн'),
-                _W('Вт'),
-                _W('Ср'),
-                _W('Чт'),
-                _W('Пт'),
-                _W('Сб'),
-                _W('Вс'),
+            const Row(
+              children: [
+                _WeekdayBadge('Пн'),
+                _WeekdayBadge('Вт'),
+                _WeekdayBadge('Ср'),
+                _WeekdayBadge('Чт'),
+                _WeekdayBadge('Пт'),
+                _WeekdayBadge('Сб'),
+                _WeekdayBadge('Вс'),
               ],
             ),
           ],
@@ -243,15 +230,28 @@ class _WeekHeader extends StatelessWidget {
       ),
     );
   }
+
+  String _weekRangeLabel(DateTime start) {
+    final end = start.add(const Duration(days: 6));
+    return '${_shortDate(start)} — ${_shortDate(end)}';
+  }
+
+  String _shortDate(DateTime day) {
+    final dd = day.day.toString().padLeft(2, '0');
+    final mm = day.month.toString().padLeft(2, '0');
+    return '$dd.$mm';
+  }
 }
 
-class _W extends StatelessWidget {
-  const _W(this.text);
+class _WeekdayBadge extends StatelessWidget {
+  const _WeekdayBadge(this.text);
+
   final String text;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+
     return Expanded(
       child: Center(
         child: Text(
@@ -268,32 +268,29 @@ class _W extends StatelessWidget {
 
 class _DayBlock extends StatelessWidget {
   const _DayBlock({
-    required this.day,
     required this.weekdayText,
     required this.dateText,
     required this.isSelected,
     required this.isToday,
     required this.events,
-    required this.timeLabel,
     required this.onOpenDay,
     required this.onOpenEvent,
   });
 
-  final DateTime day;
   final String weekdayText;
   final String dateText;
   final bool isSelected;
   final bool isToday;
   final List<Event> events;
-  final String Function(DateTime) timeLabel;
   final VoidCallback onOpenDay;
-  final Future<void> Function(Event) onOpenEvent;
+  final Future<void> Function(Event event) onOpenEvent;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
 
-    final borderColor = isSelected ? theme.colorScheme.primary : theme.dividerColor;
+    final borderColor =
+    isSelected ? theme.colorScheme.primary : theme.dividerColor;
 
     final headerStyle = theme.textTheme.titleSmall?.copyWith(
       fontWeight: FontWeight.w800,
@@ -303,12 +300,17 @@ class _DayBlock extends StatelessWidget {
       borderRadius: BorderRadius.circular(16),
       onTap: onOpenDay,
       child: Container(
+        padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: borderColor, width: isSelected ? 2 : 1),
-          color: isSelected ? theme.colorScheme.primaryContainer.withValues(alpha: 0.25) : null,
+          border: Border.all(
+            color: borderColor,
+            width: isSelected ? 2 : 1,
+          ),
+          color: isSelected
+              ? theme.colorScheme.primaryContainer.withValues(alpha: 0.25)
+              : null,
         ),
-        padding: const EdgeInsets.all(12),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
@@ -318,7 +320,10 @@ class _DayBlock extends StatelessWidget {
                 const Spacer(),
                 if (isToday)
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 4,
+                    ),
                     decoration: BoxDecoration(
                       borderRadius: BorderRadius.circular(999),
                       color: theme.colorScheme.primaryContainer,
@@ -344,13 +349,15 @@ class _DayBlock extends StatelessWidget {
             else
               Column(
                 children: [
-                  for (final e in events.take(6)) ...[
+                  for (final event in events.take(6)) ...[
                     _EventRow(
-                      title: e.title,
-                      timeText: '${timeLabel(e.startDateTime)}–${timeLabel(e.endDateTime)}',
-                      hasReminder: e.reminderBeforeMinutes != null,
-                      reminderText: _reminderInline(e.reminderBeforeMinutes),
-                      onTap: () => onOpenEvent(e),
+                      title: event.title,
+                      timeText: event.allDay
+                          ? 'Весь день'
+                          : '${formatTime(event.startDateTime)}–${formatTime(event.endDateTime)}',
+                      hasReminder: event.reminderBeforeMinutes != null,
+                      reminderText: _reminderText(event.reminderBeforeMinutes),
+                      onTap: () => onOpenEvent(event),
                     ),
                     const SizedBox(height: 8),
                   ],
@@ -372,10 +379,10 @@ class _DayBlock extends StatelessWidget {
     );
   }
 
-  String _reminderInline(int? minutes) {
-    if (minutes == null) return '';
-    if (minutes == 0) return 'к началу';
-    return 'за $minutes мин';
+  String _reminderText(int? reminderMinutes) {
+    if (reminderMinutes == null) return '';
+    if (reminderMinutes == 0) return 'к началу';
+    return 'за $reminderMinutes мин';
   }
 }
 
@@ -404,7 +411,10 @@ class _EventRow extends StatelessWidget {
         borderRadius: BorderRadius.circular(12),
         onTap: onTap,
         child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 8),
+          padding: const EdgeInsets.symmetric(
+            vertical: 8,
+            horizontal: 8,
+          ),
           child: Row(
             children: [
               Container(

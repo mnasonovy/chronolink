@@ -2,34 +2,35 @@ import 'package:hive/hive.dart';
 
 part 'hive_event.g.dart';
 
+/// Hive-модель события для локального хранения.
 @HiveType(typeId: 1)
-class HiveEvent extends HiveObject {
+class HiveEvent {
   @HiveField(0)
-  String id;
+  final String id;
 
   @HiveField(1)
-  String title;
+  final String title;
 
   @HiveField(2)
-  String? description;
+  final String? description;
 
   @HiveField(3)
-  DateTime startDateTime;
+  final DateTime startDateTime;
 
   @HiveField(4)
-  DateTime endDateTime;
+  final DateTime endDateTime;
 
   @HiveField(5)
-  bool allDay;
+  final bool allDay;
 
   @HiveField(6)
-  int? reminderBeforeMinutes;
+  final int? reminderBeforeMinutes;
 
   @HiveField(7)
-  DateTime createdAt;
+  final DateTime createdAt;
 
   @HiveField(8)
-  DateTime updatedAt;
+  final DateTime updatedAt;
 
   HiveEvent({
     required this.id,
